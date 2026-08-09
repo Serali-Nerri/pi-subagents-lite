@@ -8,19 +8,19 @@
  */
 
 import {
-  CustomEditor,
-  type ExtensionUIContext,
+	CustomEditor,
+	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-  Key,
-  matchesKey,
-  truncateToWidth,
-  wrapTextWithAnsi,
-  type AutocompleteProvider,
-  type Component,
-  type EditorComponent,
-  type Focusable,
-  type TUI,
+	Key,
+	matchesKey,
+	truncateToWidth,
+	wrapTextWithAnsi,
+	type AutocompleteProvider,
+	type Component,
+	type EditorComponent,
+	type Focusable,
+	type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agents/agent-manager.js";
 import type { AgentRecord } from "../types.js";
@@ -34,933 +34,1107 @@ const REFRESH_INTERVAL_MS = 80;
 const TOOL_RESULT_CHAR_LIMIT = 4000;
 const PI_0801_ROOT_CHILDREN = 8;
 const PI_08010_ROOT_CHILDREN = 9;
+const PI_084_ROOT_CHILDREN = 7;
+const PI_084_DOCUMENT_CHILDREN = 3;
 const ROOT_REGIONS_AFTER_CHAT = 6;
-const MAIN_CHAT_COMPONENT_PATTERN = /^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
+const MAIN_CHAT_COMPONENT_PATTERN =
+	/^(?:UserMessage|AssistantMessage|ToolExecution|BashExecution|SkillInvocationMessage|CustomEntry|CustomMessage|CompactionSummaryMessage|BranchSummaryMessage|Armin|Daxnuts|EarendilAnnouncement)Component$/;
 const CLEAR_SCROLLBACK_SEQUENCE = "\x1b[3J";
 
 type NavigatorUICtx = Pick<
-  ExtensionUIContext,
-  | "getEditorComponent"
-  | "getEditorText"
-  | "notify"
-  | "setEditorComponent"
-  | "setEditorText"
-  | "setWidget"
-  | "theme"
+	ExtensionUIContext,
+	| "getEditorComponent"
+	| "getEditorText"
+	| "notify"
+	| "setEditorComponent"
+	| "setEditorText"
+	| "setWidget"
+	| "theme"
 >;
 
 type NavigationEntry = { id: string | null; record?: AgentRecord };
 
 type MessageLike = {
-  role: string;
-  content?: unknown;
-  toolName?: string;
-  isError?: boolean;
-  command?: string;
-  output?: string;
-  summary?: string;
+	role: string;
+	content?: unknown;
+	toolName?: string;
+	isError?: boolean;
+	command?: string;
+	output?: string;
+	summary?: string;
 };
 
 interface ScreenSwapState {
-  tui: TUI;
-  rootChildren: Component[];
-  chatIndex: number;
-  pendingIndex: number;
-  statusIndex: number;
-  footerIndex: number;
-  originalChat: Component;
-  originalPending: Component;
-  originalStatus: Component;
-  originalFooter: Component;
-  transcript: Component;
-  emptyPending: Component;
-  emptyStatus: Component;
-  childFooter: Component;
-  active: boolean;
+	tui: TUI;
+	chatChildren: Component[];
+	pendingChildren: Component[];
+	statusChildren: Component[];
+	footerChildren: Component[];
+	chatIndex: number;
+	pendingIndex: number;
+	statusIndex: number;
+	footerIndex: number;
+	originalChat: Component;
+	originalPending: Component;
+	originalStatus: Component;
+	originalFooter: Component;
+	transcript: Component;
+	emptyPending: Component;
+	emptyStatus: Component;
+	childFooter: Component;
+	active: boolean;
 }
 
 function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((item): item is { type: string; text: string } =>
-      typeof item === "object"
-      && item !== null
-      && (item as { type?: string }).type === "text"
-      && typeof (item as { text?: unknown }).text === "string",
-    )
-    .map(item => item.text)
-    .join("");
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(
+			(item): item is { type: string; text: string } =>
+				typeof item === "object" &&
+				item !== null &&
+				(item as { type?: string }).type === "text" &&
+				typeof (item as { text?: unknown }).text === "string",
+		)
+		.map((item) => item.text)
+		.join("");
 }
 
 function imageCount(content: unknown): number {
-  if (!Array.isArray(content)) return 0;
-  return content.filter(item =>
-    typeof item === "object"
-    && item !== null
-    && (item as { type?: string }).type === "image"
-  ).length;
+	if (!Array.isArray(content)) return 0;
+	return content.filter(
+		(item) =>
+			typeof item === "object" &&
+			item !== null &&
+			(item as { type?: string }).type === "image",
+	).length;
 }
 
 function formatToolCall(item: Record<string, unknown>): string {
-  const name = typeof item.name === "string" ? item.name : "tool";
-  const args = item.arguments && typeof item.arguments === "object"
-    ? item.arguments as Record<string, unknown>
-    : undefined;
-  return `▸ ${name}${summarizeToolArgs(name, args)}`;
+	const name = typeof item.name === "string" ? item.name : "tool";
+	const args =
+		item.arguments && typeof item.arguments === "object"
+			? (item.arguments as Record<string, unknown>)
+			: undefined;
+	return `▸ ${name}${summarizeToolArgs(name, args)}`;
 }
 
 function appendWrapped(lines: string[], text: string, width: number): void {
-  const wrapWidth = Math.max(1, width - 2);
-  const sourceLines = text.split("\n");
-  for (const sourceLine of sourceLines) {
-    if (!sourceLine) {
-      lines.push("");
-      continue;
-    }
-    const wrapped = wrapTextWithAnsi(sourceLine, wrapWidth);
-    lines.push(...wrapped.map(line => `  ${line}`));
-  }
+	const wrapWidth = Math.max(1, width - 2);
+	const sourceLines = text.split("\n");
+	for (const sourceLine of sourceLines) {
+		if (!sourceLine) {
+			lines.push("");
+			continue;
+		}
+		const wrapped = wrapTextWithAnsi(sourceLine, wrapWidth);
+		lines.push(...wrapped.map((line) => `  ${line}`));
+	}
 }
 
 function statusIcon(record: AgentRecord, spinnerFrame: string): string {
-  switch (record.lifecycle.status) {
-    case "running": return spinnerFrame;
-    case "queued": return "◦";
-    case "completed": return "✓";
-    case "turn_limited": return "✓";
-    case "stopped": return "■";
-    case "error": return "✗";
-    case "aborted": return "✗";
-  }
+	switch (record.lifecycle.status) {
+		case "running":
+			return spinnerFrame;
+		case "queued":
+			return "◦";
+		case "completed":
+			return "✓";
+		case "turn_limited":
+			return "✓";
+		case "stopped":
+			return "■";
+		case "error":
+			return "✗";
+		case "aborted":
+			return "✗";
+	}
 }
 
 function isComponent(value: unknown): value is Component {
-  return typeof value === "object"
-    && value !== null
-    && typeof (value as Component).render === "function"
-    && typeof (value as Component).invalidate === "function";
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as Component).render === "function" &&
+		typeof (value as Component).invalidate === "function"
+	);
 }
 
-function isContainerLike(value: unknown): value is Component & { children: Component[] } {
-  return isComponent(value)
-    && Array.isArray((value as { children?: unknown }).children);
+function isContainerLike(
+	value: unknown,
+): value is Component & { children: Component[] } {
+	return (
+		isComponent(value) &&
+		Array.isArray((value as { children?: unknown }).children)
+	);
 }
 
-function containsComponent(root: Component & { children: Component[] }, target: Component): boolean {
-  for (const child of root.children) {
-    if (child === target) return true;
-    if (isContainerLike(child) && containsComponent(child, target)) return true;
-  }
-  return false;
+function containsComponent(
+	root: Component & { children: Component[] },
+	target: Component,
+): boolean {
+	for (const child of root.children) {
+		if (child === target) return true;
+		if (isContainerLike(child) && containsComponent(child, target)) return true;
+	}
+	return false;
 }
 
-function containsMainChatComponent(root: Component & { children: Component[] }): boolean {
-  for (const child of root.children) {
-    if (MAIN_CHAT_COMPONENT_PATTERN.test(child.constructor?.name ?? "")) return true;
-    if (isContainerLike(child) && containsMainChatComponent(child)) return true;
-  }
-  return false;
+function containsMainChatComponent(
+	root: Component & { children: Component[] },
+): boolean {
+	for (const child of root.children) {
+		if (MAIN_CHAT_COMPONENT_PATTERN.test(child.constructor?.name ?? ""))
+			return true;
+		if (isContainerLike(child) && containsMainChatComponent(child)) return true;
+	}
+	return false;
 }
 
 function emptyComponent(): Component {
-  return {
-    render: () => [],
-    invalidate: () => {},
-  };
+	return {
+		render: () => [],
+		invalidate: () => {},
+	};
 }
 
 class ForwardingActionMap extends Map<string, () => void> {
-  constructor(
-    private base: Map<string, () => void>,
-    private wrapFollowUp: (handler: () => void) => () => void,
-  ) {
-    super();
-  }
+	constructor(
+		private base: Map<string, () => void>,
+		private wrapFollowUp: (handler: () => void) => () => void,
+	) {
+		super();
+	}
 
-  override set(action: string, handler: () => void): this {
-    this.base.set(
-      action,
-      action === "app.message.followUp" ? this.wrapFollowUp(handler) : handler,
-    );
-    return this;
-  }
+	override set(action: string, handler: () => void): this {
+		this.base.set(
+			action,
+			action === "app.message.followUp" ? this.wrapFollowUp(handler) : handler,
+		);
+		return this;
+	}
 }
 
 /** Editor decorator that receives navigation keys only while the editor is focused. */
 class AgentNavigationEditor implements EditorComponent, Focusable {
-  private parentOnSubmit: ((text: string) => void) | undefined;
-  private forwardedActions: ForwardingActionMap | undefined;
+	private parentOnSubmit: ((text: string) => void) | undefined;
+	private forwardedActions: ForwardingActionMap | undefined;
 
-  constructor(
-    private base: EditorComponent,
-    private navigator: AgentNavigator,
-  ) {}
+	constructor(
+		private base: EditorComponent,
+		private navigator: AgentNavigator,
+	) {}
 
-  get focused(): boolean {
-    return (this.base as Partial<Focusable>).focused ?? false;
-  }
+	get focused(): boolean {
+		return (this.base as Partial<Focusable>).focused ?? false;
+	}
 
-  get wantsKeyRelease(): boolean | undefined {
-    return this.base.wantsKeyRelease;
-  }
+	get wantsKeyRelease(): boolean | undefined {
+		return this.base.wantsKeyRelease;
+	}
 
-  set focused(value: boolean) {
-    if ("focused" in this.base) {
-      (this.base as EditorComponent & Focusable).focused = value;
-    }
-  }
+	set focused(value: boolean) {
+		if ("focused" in this.base) {
+			(this.base as EditorComponent & Focusable).focused = value;
+		}
+	}
 
-  get onSubmit(): ((text: string) => void) | undefined {
-    return this.parentOnSubmit;
-  }
+	get onSubmit(): ((text: string) => void) | undefined {
+		return this.parentOnSubmit;
+	}
 
-  set onSubmit(handler: ((text: string) => void) | undefined) {
-    this.parentOnSubmit = handler;
-    this.base.onSubmit = (text) => {
-      if (this.navigator.handleEditorSubmit(text)) {
-        this.base.addToHistory?.(text);
-        return;
-      }
-      handler?.(text);
-    };
-  }
+	set onSubmit(handler: ((text: string) => void) | undefined) {
+		this.parentOnSubmit = handler;
+		this.base.onSubmit = (text) => {
+			if (this.navigator.handleEditorSubmit(text)) {
+				this.base.addToHistory?.(text);
+				return;
+			}
+			handler?.(text);
+		};
+	}
 
-  get onChange(): ((text: string) => void) | undefined {
-    return this.base.onChange;
-  }
+	get onChange(): ((text: string) => void) | undefined {
+		return this.base.onChange;
+	}
 
-  set onChange(handler: ((text: string) => void) | undefined) {
-    this.base.onChange = handler;
-  }
+	set onChange(handler: ((text: string) => void) | undefined) {
+		this.base.onChange = handler;
+	}
 
-  get borderColor(): ((text: string) => string) | undefined {
-    return this.base.borderColor;
-  }
+	get borderColor(): ((text: string) => string) | undefined {
+		return this.base.borderColor;
+	}
 
-  set borderColor(color: ((text: string) => string) | undefined) {
-    this.base.borderColor = color;
-  }
+	set borderColor(color: ((text: string) => string) | undefined) {
+		this.base.borderColor = color;
+	}
 
-  get actionHandlers(): Map<string, () => void> | undefined {
-    const baseActions = (this.base as unknown as { actionHandlers?: Map<string, () => void> }).actionHandlers;
-    if (!baseActions) return undefined;
-    this.forwardedActions ??= new ForwardingActionMap(
-      baseActions,
-      (parentHandler) => () => {
-        const text = this.base.getExpandedText?.() ?? this.base.getText();
-        if (this.navigator.handleEditorSubmit(text)) {
-          this.base.addToHistory?.(text.trim());
-          this.base.setText("");
-          return;
-        }
-        parentHandler();
-      },
-    );
-    return this.forwardedActions;
-  }
+	get actionHandlers(): Map<string, () => void> | undefined {
+		const baseActions = (
+			this.base as unknown as { actionHandlers?: Map<string, () => void> }
+		).actionHandlers;
+		if (!baseActions) return undefined;
+		this.forwardedActions ??= new ForwardingActionMap(
+			baseActions,
+			(parentHandler) => () => {
+				const text = this.base.getExpandedText?.() ?? this.base.getText();
+				if (this.navigator.handleEditorSubmit(text)) {
+					this.base.addToHistory?.(text.trim());
+					this.base.setText("");
+					return;
+				}
+				parentHandler();
+			},
+		);
+		return this.forwardedActions;
+	}
 
-  get onEscape(): (() => void) | undefined {
-    return (this.base as unknown as { onEscape?: () => void }).onEscape;
-  }
+	get onEscape(): (() => void) | undefined {
+		return (this.base as unknown as { onEscape?: () => void }).onEscape;
+	}
 
-  set onEscape(handler: (() => void) | undefined) {
-    (this.base as unknown as { onEscape?: () => void }).onEscape = handler;
-  }
+	set onEscape(handler: (() => void) | undefined) {
+		(this.base as unknown as { onEscape?: () => void }).onEscape = handler;
+	}
 
-  get onCtrlD(): (() => void) | undefined {
-    return (this.base as unknown as { onCtrlD?: () => void }).onCtrlD;
-  }
+	get onCtrlD(): (() => void) | undefined {
+		return (this.base as unknown as { onCtrlD?: () => void }).onCtrlD;
+	}
 
-  set onCtrlD(handler: (() => void) | undefined) {
-    (this.base as unknown as { onCtrlD?: () => void }).onCtrlD = handler;
-  }
+	set onCtrlD(handler: (() => void) | undefined) {
+		(this.base as unknown as { onCtrlD?: () => void }).onCtrlD = handler;
+	}
 
-  get onPasteImage(): (() => void) | undefined {
-    return (this.base as unknown as { onPasteImage?: () => void }).onPasteImage;
-  }
+	get onPasteImage(): (() => void) | undefined {
+		return (this.base as unknown as { onPasteImage?: () => void }).onPasteImage;
+	}
 
-  set onPasteImage(handler: (() => void) | undefined) {
-    (this.base as unknown as { onPasteImage?: () => void }).onPasteImage = handler;
-  }
+	set onPasteImage(handler: (() => void) | undefined) {
+		(this.base as unknown as { onPasteImage?: () => void }).onPasteImage =
+			handler;
+	}
 
-  get onExtensionShortcut(): ((data: string) => void) | undefined {
-    return (this.base as unknown as { onExtensionShortcut?: (data: string) => void }).onExtensionShortcut;
-  }
+	get onExtensionShortcut(): ((data: string) => void) | undefined {
+		return (
+			this.base as unknown as { onExtensionShortcut?: (data: string) => void }
+		).onExtensionShortcut;
+	}
 
-  set onExtensionShortcut(handler: ((data: string) => void) | undefined) {
-    (this.base as unknown as { onExtensionShortcut?: (data: string) => void }).onExtensionShortcut = handler;
-  }
+	set onExtensionShortcut(handler: ((data: string) => void) | undefined) {
+		(
+			this.base as unknown as { onExtensionShortcut?: (data: string) => void }
+		).onExtensionShortcut = handler;
+	}
 
-  render(width: number): string[] {
-    return this.base.render(width);
-  }
+	render(width: number): string[] {
+		return this.base.render(width);
+	}
 
-  handleInput(data: string): void {
-    const result = this.navigator.handleTerminalInput(data);
-    if (!result?.consume) this.base.handleInput(data);
-  }
+	handleInput(data: string): void {
+		const result = this.navigator.handleTerminalInput(data);
+		if (!result?.consume) this.base.handleInput(data);
+	}
 
-  invalidate(): void {
-    this.base.invalidate();
-  }
+	invalidate(): void {
+		this.base.invalidate();
+	}
 
-  getText(): string {
-    return this.base.getText();
-  }
+	getText(): string {
+		return this.base.getText();
+	}
 
-  setText(text: string): void {
-    this.base.setText(text);
-  }
+	setText(text: string): void {
+		this.base.setText(text);
+	}
 
-  addToHistory(text: string): void {
-    this.base.addToHistory?.(text);
-  }
+	addToHistory(text: string): void {
+		this.base.addToHistory?.(text);
+	}
 
-  insertTextAtCursor(text: string): void {
-    this.base.insertTextAtCursor?.(text);
-  }
+	insertTextAtCursor(text: string): void {
+		this.base.insertTextAtCursor?.(text);
+	}
 
-  getExpandedText(): string {
-    return this.base.getExpandedText?.() ?? this.base.getText();
-  }
+	getExpandedText(): string {
+		return this.base.getExpandedText?.() ?? this.base.getText();
+	}
 
-  setAutocompleteProvider(provider: AutocompleteProvider): void {
-    this.base.setAutocompleteProvider?.(provider);
-  }
+	setAutocompleteProvider(provider: AutocompleteProvider): void {
+		this.base.setAutocompleteProvider?.(provider);
+	}
 
-  setPaddingX(padding: number): void {
-    this.base.setPaddingX?.(padding);
-  }
+	setPaddingX(padding: number): void {
+		this.base.setPaddingX?.(padding);
+	}
 
-  setAutocompleteMaxVisible(maxVisible: number): void {
-    this.base.setAutocompleteMaxVisible?.(maxVisible);
-  }
+	setAutocompleteMaxVisible(maxVisible: number): void {
+		this.base.setAutocompleteMaxVisible?.(maxVisible);
+	}
 }
 
 export class AgentNavigator {
-  private uiCtx: NavigatorUICtx | undefined;
-  /** Agent whose transcript and input routing are active. Null means parent. */
-  private selectedAgentId: string | null = null;
-  /** Candidate row moved by Up/Down while the selector has focus. */
-  private highlightedAgentId: string | null = null;
-  private listFocused = false;
-  private spinnerFrame = 0;
-  private refreshTimer: ReturnType<typeof setInterval> | undefined;
-  private selectorRegistered = false;
-  private selectorTui: TUI | undefined;
-  private screenSwap: ScreenSwapState | undefined;
-  private layoutWarningShown = false;
-  private restoreEditor: (() => void) | undefined;
-  private navigationEditor: AgentNavigationEditor | undefined;
+	private uiCtx: NavigatorUICtx | undefined;
+	/** Agent whose transcript and input routing are active. Null means parent. */
+	private selectedAgentId: string | null = null;
+	/** Candidate row moved by Up/Down while the selector has focus. */
+	private highlightedAgentId: string | null = null;
+	private listFocused = false;
+	private spinnerFrame = 0;
+	private refreshTimer: ReturnType<typeof setInterval> | undefined;
+	private selectorRegistered = false;
+	private selectorTui: TUI | undefined;
+	private screenSwap: ScreenSwapState | undefined;
+	private layoutWarningShown = false;
+	private restoreEditor: (() => void) | undefined;
+	private navigationEditor: AgentNavigationEditor | undefined;
 
-  constructor(
-    private manager: AgentManager,
-    private routeInput?: (agentId: string, text: string) => Promise<boolean>,
-  ) {}
+	constructor(
+		private manager: AgentManager,
+		private routeInput?: (agentId: string, text: string) => Promise<boolean>,
+	) {}
 
-  setUICtx(ctx: NavigatorUICtx): void {
-    if (ctx === this.uiCtx) return;
-    if (this.restoreMainScreen()) this.clearScrollbackAndRender();
-    this.restoreEditor?.();
-    this.uiCtx = ctx;
-    this.selectorRegistered = false;
-    this.selectorTui = undefined;
-    this.screenSwap = undefined;
-    this.layoutWarningShown = false;
+	setUICtx(ctx: NavigatorUICtx): void {
+		if (ctx === this.uiCtx) return;
+		if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+		this.restoreEditor?.();
+		this.uiCtx = ctx;
+		this.selectorRegistered = false;
+		this.selectorTui = undefined;
+		this.screenSwap = undefined;
+		this.layoutWarningShown = false;
 
-    const previousEditor = ctx.getEditorComponent();
-    ctx.setEditorComponent((tui, theme, keybindings) => {
-      const base = previousEditor?.(tui, theme, keybindings)
-        ?? new CustomEditor(tui, theme, keybindings);
-      const editor = new AgentNavigationEditor(base, this);
-      this.navigationEditor = editor;
-      return editor;
-    });
-    this.restoreEditor = () => {
-      ctx.setEditorComponent(previousEditor);
-      this.navigationEditor = undefined;
-    };
-    this.update();
-  }
+		const previousEditor = ctx.getEditorComponent();
+		ctx.setEditorComponent((tui, theme, keybindings) => {
+			const base =
+				previousEditor?.(tui, theme, keybindings) ??
+				new CustomEditor(tui, theme, keybindings);
+			const editor = new AgentNavigationEditor(base, this);
+			this.navigationEditor = editor;
+			return editor;
+		});
+		this.restoreEditor = () => {
+			ctx.setEditorComponent(previousEditor);
+			this.navigationEditor = undefined;
+		};
+		this.update();
+	}
 
-  selectedId(): string | null {
-    if (this.selectedAgentId && !this.manager.getRecord(this.selectedAgentId)) {
-      this.selectedAgentId = null;
-      this.highlightedAgentId = null;
-      this.listFocused = false;
-      if (this.restoreMainScreen()) this.clearScrollbackAndRender();
-      this.update();
-    }
-    return this.selectedAgentId;
-  }
+	selectedId(): string | null {
+		if (this.selectedAgentId && !this.manager.getRecord(this.selectedAgentId)) {
+			this.selectedAgentId = null;
+			this.highlightedAgentId = null;
+			this.listFocused = false;
+			if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+			this.update();
+		}
+		return this.selectedAgentId;
+	}
 
-  ensureTimer(): void {
-    if (!this.uiCtx) return;
-    if (!this.refreshTimer) {
-      this.refreshTimer = setInterval(() => {
-        this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
-        this.update();
-      }, REFRESH_INTERVAL_MS);
-    }
-    this.update();
-  }
+	ensureTimer(): void {
+		if (!this.uiCtx) return;
+		if (!this.refreshTimer) {
+			this.refreshTimer = setInterval(() => {
+				this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
+				this.update();
+			}, REFRESH_INTERVAL_MS);
+		}
+		this.update();
+	}
 
-  /** Route ordinary editor submissions before Pi can enqueue them on Main. */
-  handleEditorSubmit(text: string): boolean {
-    const agentId = this.selectedId();
-    const trimmed = text.trim();
-    if (
-      !agentId
-      || !trimmed
-      || trimmed.startsWith("/")
-      || trimmed.startsWith("!")
-      || !this.routeInput
-    ) {
-      return false;
-    }
+	/** Route ordinary editor submissions before Pi can enqueue them on Main. */
+	handleEditorSubmit(text: string): boolean {
+		const agentId = this.selectedId();
+		const trimmed = text.trim();
+		if (
+			!agentId ||
+			!trimmed ||
+			trimmed.startsWith("/") ||
+			trimmed.startsWith("!") ||
+			!this.routeInput
+		) {
+			return false;
+		}
 
-    void this.routeInput(agentId, trimmed)
-      .then((accepted) => {
-        if (accepted) return;
-        this.uiCtx?.setEditorText(text);
-        this.uiCtx?.notify("Selected subagent is not available for interaction", "warning");
-      })
-      .catch(() => {
-        this.uiCtx?.setEditorText(text);
-        this.uiCtx?.notify("Failed to send input to selected subagent", "warning");
-      });
-    return true;
-  }
+		void this.routeInput(agentId, trimmed)
+			.then((accepted) => {
+				if (accepted) return;
+				this.uiCtx?.setEditorText(text);
+				this.uiCtx?.notify(
+					"Selected subagent is not available for interaction",
+					"warning",
+				);
+			})
+			.catch(() => {
+				this.uiCtx?.setEditorText(text);
+				this.uiCtx?.notify(
+					"Failed to send input to selected subagent",
+					"warning",
+				);
+			});
+		return true;
+	}
 
-  /**
-   * Enter the list from an empty editor with Down. Up/Down only moves the
-   * candidate row; Enter confirms the switch and keeps the active row focused.
-   * Escape or Up above Main returns input to the editor.
-   */
-  handleTerminalInput(data: string): { consume?: boolean } | undefined {
-    const entries = this.navigationEntries();
-    if (entries.length <= 1) return undefined;
+	/**
+	 * Enter the list from an empty editor with Down. Up/Down only moves the
+	 * candidate row; Enter confirms the switch and keeps the active row focused.
+	 * Escape or Up above Main returns input to the editor.
+	 */
+	handleTerminalInput(data: string): { consume?: boolean } | undefined {
+		const entries = this.navigationEntries();
+		if (entries.length <= 1) return undefined;
 
-    if (!this.listFocused) {
-      if (matchesKey(data, Key.down) && this.uiCtx?.getEditorText() === "") {
-        this.listFocused = true;
-        this.highlightedAgentId = this.selectedAgentId;
-        this.requestRender();
-        return { consume: true };
-      }
-      return undefined;
-    }
+		if (!this.listFocused) {
+			if (matchesKey(data, Key.down) && this.uiCtx?.getEditorText() === "") {
+				this.listFocused = true;
+				this.highlightedAgentId = this.selectedAgentId;
+				this.requestRender();
+				return { consume: true };
+			}
+			return undefined;
+		}
 
-    if (matchesKey(data, Key.escape)) {
-      this.listFocused = false;
-      this.highlightedAgentId = this.selectedAgentId;
-      this.requestRender();
-      return { consume: true };
-    }
+		if (matchesKey(data, Key.escape)) {
+			this.listFocused = false;
+			this.highlightedAgentId = this.selectedAgentId;
+			this.requestRender();
+			return { consume: true };
+		}
 
-    if (matchesKey(data, Key.enter)) {
-      const candidate = this.highlightedAgentId;
-      if (!this.activate(candidate)) {
-        this.highlightedAgentId = this.selectedAgentId;
-      }
-      this.update();
-      return { consume: true };
-    }
+		if (matchesKey(data, Key.enter)) {
+			const candidate = this.highlightedAgentId;
+			if (!this.activate(candidate)) {
+				this.highlightedAgentId = this.selectedAgentId;
+			}
+			this.update();
+			return { consume: true };
+		}
 
-    const highlightedIndex = Math.max(
-      0,
-      entries.findIndex(entry => entry.id === this.highlightedAgentId),
-    );
+		const highlightedIndex = Math.max(
+			0,
+			entries.findIndex((entry) => entry.id === this.highlightedAgentId),
+		);
 
-    if (matchesKey(data, Key.up)) {
-      if (highlightedIndex === 0) {
-        this.listFocused = false;
-        this.highlightedAgentId = this.selectedAgentId;
-      } else {
-        this.highlightedAgentId = entries[highlightedIndex - 1]?.id ?? null;
-      }
-      this.requestRender();
-      return { consume: true };
-    }
+		if (matchesKey(data, Key.up)) {
+			if (highlightedIndex === 0) {
+				this.listFocused = false;
+				this.highlightedAgentId = this.selectedAgentId;
+			} else {
+				this.highlightedAgentId = entries[highlightedIndex - 1]?.id ?? null;
+			}
+			this.requestRender();
+			return { consume: true };
+		}
 
-    if (matchesKey(data, Key.down)) {
-      if (highlightedIndex < entries.length - 1) {
-        this.highlightedAgentId = entries[highlightedIndex + 1]?.id ?? null;
-      }
-      this.requestRender();
-      return { consume: true };
-    }
+		if (matchesKey(data, Key.down)) {
+			if (highlightedIndex < entries.length - 1) {
+				this.highlightedAgentId = entries[highlightedIndex + 1]?.id ?? null;
+			}
+			this.requestRender();
+			return { consume: true };
+		}
 
-    if (data.length === 1 && data.charCodeAt(0) >= 32) {
-      this.listFocused = false;
-      this.highlightedAgentId = this.selectedAgentId;
-      this.requestRender();
-    }
-    return undefined;
-  }
+		if (data.length === 1 && data.charCodeAt(0) >= 32) {
+			this.listFocused = false;
+			this.highlightedAgentId = this.selectedAgentId;
+			this.requestRender();
+		}
+		return undefined;
+	}
 
-  private navigationEntries(): NavigationEntry[] {
-    return [
-      { id: null },
-      ...this.manager.listAgents().map(record => ({ id: record.id, record })),
-    ];
-  }
+	private navigationEntries(): NavigationEntry[] {
+		return [
+			{ id: null },
+			...this.manager.listAgents().map((record) => ({ id: record.id, record })),
+		];
+	}
 
-  private activate(id: string | null): boolean {
-    if (id === this.selectedAgentId) return true;
-    if (id && !this.manager.getRecord(id)) return false;
+	private activate(id: string | null): boolean {
+		if (id === this.selectedAgentId) return true;
+		if (id && !this.manager.getRecord(id)) return false;
 
-    if (id) {
-      if (!this.swapToSubagentScreen()) {
-        this.warnUnsupportedLayout();
-        return false;
-      }
-      this.selectedAgentId = id;
-    } else {
-      this.selectedAgentId = null;
-      this.restoreMainScreen();
-    }
+		if (id) {
+			if (!this.swapToSubagentScreen()) {
+				this.warnUnsupportedLayout();
+				return false;
+			}
+			this.selectedAgentId = id;
+		} else {
+			this.selectedAgentId = null;
+			this.restoreMainScreen();
+		}
 
-    this.highlightedAgentId = this.selectedAgentId;
-    this.clearScrollbackAndRender();
-    if (id && !this.refreshTimer) this.ensureTimer();
-    return true;
-  }
+		this.highlightedAgentId = this.selectedAgentId;
+		this.clearScrollbackAndRender();
+		if (id && !this.refreshTimer) this.ensureTimer();
+		return true;
+	}
 
-  private captureScreen(tui: TUI, selector: Component): void {
-    if (this.screenSwap?.tui === tui) return;
-    if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+	private captureScreen(tui: TUI, selector: Component): void {
+		if (this.screenSwap?.tui === tui) return;
+		if (this.restoreMainScreen()) this.clearScrollbackAndRender();
 
-    const rootChildren = tui.children;
-    const belowMatches = rootChildren
-      .map((child, index) => ({ child, index }))
-      .filter(({ child }) => isContainerLike(child) && containsComponent(child, selector));
-    const widgetBelowIndex = belowMatches[0]?.index ?? -1;
-    const knownRootLength = rootChildren.length === PI_0801_ROOT_CHILDREN
-      || rootChildren.length === PI_08010_ROOT_CHILDREN;
-    const chatIndex = rootChildren.length - ROOT_REGIONS_AFTER_CHAT - 1;
-    const pendingIndex = chatIndex + 1;
-    const statusIndex = chatIndex + 2;
-    const widgetAboveIndex = chatIndex + 3;
-    const editorIndex = chatIndex + 4;
-    const originalChat = rootChildren[chatIndex];
-    const originalPending = rootChildren[pendingIndex];
-    const originalStatus = rootChildren[statusIndex];
-    const widgetAbove = rootChildren[widgetAboveIndex];
-    const editorContainer = rootChildren[editorIndex];
-    const widgetBelow = rootChildren[widgetBelowIndex];
-    const footerIndex = widgetBelowIndex + 1;
-    const originalFooter = rootChildren[footerIndex];
-    // In 0.80.10 this slot is loaded resources. A main-message component here
-    // instead identifies an older layout shifted by an unknown middle region.
-    const shiftedChatCandidate = rootChildren.length === PI_08010_ROOT_CHILDREN
-      ? rootChildren[chatIndex - 1]
-      : undefined;
-    const looksLikeShifted0801Layout = isContainerLike(shiftedChatCandidate)
-      && containsMainChatComponent(shiftedChatCandidate);
-    if (
-      !knownRootLength
-      || belowMatches.length !== 1
-      || widgetBelowIndex !== rootChildren.length - 2
-      || chatIndex < 1
-      || looksLikeShifted0801Layout
-      || !isContainerLike(originalChat)
-      || !isContainerLike(originalPending)
-      || !isContainerLike(originalStatus)
-      || !isContainerLike(widgetAbove)
-      || !isContainerLike(editorContainer)
-      || !isContainerLike(widgetBelow)
-      || !this.navigationEditor
-      || !containsComponent(editorContainer, this.navigationEditor)
-      || !isComponent(originalFooter)
-    ) {
-      this.screenSwap = undefined;
-      this.warnUnsupportedLayout();
-      return;
-    }
+		const rootChildren = tui.children;
+		const belowMatches = rootChildren
+			.map((child, index) => ({ child, index }))
+			.filter(
+				({ child }) =>
+					isContainerLike(child) && containsComponent(child, selector),
+			);
+		const widgetBelowIndex = belowMatches[0]?.index ?? -1;
+		let chatChildren = rootChildren;
+		const pendingChildren = rootChildren;
+		const statusChildren = rootChildren;
+		let footerChildren = rootChildren;
+		let chatIndex = rootChildren.length - ROOT_REGIONS_AFTER_CHAT - 1;
+		let pendingIndex = chatIndex + 1;
+		let statusIndex = chatIndex + 2;
+		let widgetAboveIndex = chatIndex + 3;
+		let editorIndex = chatIndex + 4;
+		let footerIndex = widgetBelowIndex + 1;
+		let layoutCompatible = false;
 
-    const transcript: Component = {
-      render: (width) => this.renderActiveTranscript(width),
-      invalidate: () => {},
-    };
-    const childFooter = this.createChildFooter(originalFooter);
-    this.screenSwap = {
-      tui,
-      rootChildren,
-      chatIndex,
-      pendingIndex,
-      statusIndex,
-      footerIndex,
-      originalChat,
-      originalPending,
-      originalStatus,
-      originalFooter,
-      transcript,
-      emptyPending: emptyComponent(),
-      emptyStatus: emptyComponent(),
-      childFooter,
-      active: false,
-    };
-  }
+		if (
+			rootChildren.length === PI_0801_ROOT_CHILDREN ||
+			rootChildren.length === PI_08010_ROOT_CHILDREN
+		) {
+			// In 0.80.10 this slot is loaded resources. A main-message component
+			// here instead identifies an older layout shifted by an unknown region.
+			const shiftedChatCandidate =
+				rootChildren.length === PI_08010_ROOT_CHILDREN
+					? rootChildren[chatIndex - 1]
+					: undefined;
+			layoutCompatible = !(
+				isContainerLike(shiftedChatCandidate) &&
+				containsMainChatComponent(shiftedChatCandidate)
+			);
+		} else if (rootChildren.length === PI_084_ROOT_CHILDREN) {
+			const documentContainer = rootChildren[0];
+			const footerContainer = rootChildren[PI_084_ROOT_CHILDREN - 1];
+			if (
+				isContainerLike(documentContainer) &&
+				documentContainer.children.length === PI_084_DOCUMENT_CHILDREN &&
+				isContainerLike(footerContainer) &&
+				footerContainer.children.length === 1
+			) {
+				chatChildren = documentContainer.children;
+				footerChildren = footerContainer.children;
+				chatIndex = PI_084_DOCUMENT_CHILDREN - 1;
+				pendingIndex = 1;
+				statusIndex = 2;
+				widgetAboveIndex = 3;
+				editorIndex = 4;
+				footerIndex = 0;
+				layoutCompatible = true;
+			}
+		}
 
-  private createChildFooter(originalFooter: Component): Component {
-    let childFooter: Component;
-    childFooter = {
-      render: (width) => {
-        const screen = this.screenSwap;
-        if (screen?.active && screen.childFooter === childFooter) {
-          this.syncExternalFooter(screen);
-          if (screen.childFooter !== childFooter) {
-            screen.tui.requestRender();
-            return [];
-          }
-        }
-        return this.renderChildFooter(originalFooter, width);
-      },
-      invalidate: () => originalFooter.invalidate(),
-    };
-    return childFooter;
-  }
+		const originalChat = chatChildren[chatIndex];
+		const originalPending = pendingChildren[pendingIndex];
+		const originalStatus = statusChildren[statusIndex];
+		const widgetAbove = rootChildren[widgetAboveIndex];
+		const editorContainer = rootChildren[editorIndex];
+		const widgetBelow = rootChildren[widgetBelowIndex];
+		const originalFooter = footerChildren[footerIndex];
+		if (
+			!layoutCompatible ||
+			belowMatches.length !== 1 ||
+			widgetBelowIndex !== rootChildren.length - 2 ||
+			chatIndex < 1 ||
+			!isContainerLike(originalChat) ||
+			!isContainerLike(originalPending) ||
+			!isContainerLike(originalStatus) ||
+			!isContainerLike(widgetAbove) ||
+			!isContainerLike(editorContainer) ||
+			!isContainerLike(widgetBelow) ||
+			!this.navigationEditor ||
+			!containsComponent(editorContainer, this.navigationEditor) ||
+			!isComponent(originalFooter)
+		) {
+			this.screenSwap = undefined;
+			this.warnUnsupportedLayout();
+			return;
+		}
 
-  private adoptFooter(screen: ScreenSwapState, originalFooter: Component): void {
-    screen.originalFooter = originalFooter;
-    screen.childFooter = this.createChildFooter(originalFooter);
-  }
+		const transcript: Component = {
+			render: (width) => this.renderActiveTranscript(width),
+			invalidate: () => {},
+		};
+		const childFooter = this.createChildFooter(originalFooter);
+		this.screenSwap = {
+			tui,
+			chatChildren,
+			pendingChildren,
+			statusChildren,
+			footerChildren,
+			chatIndex,
+			pendingIndex,
+			statusIndex,
+			footerIndex,
+			originalChat,
+			originalPending,
+			originalStatus,
+			originalFooter,
+			transcript,
+			emptyPending: emptyComponent(),
+			emptyStatus: emptyComponent(),
+			childFooter,
+			active: false,
+		};
+	}
 
-  /** Keep footer ownership correct when another extension calls setFooter(). */
-  private syncExternalFooter(screen: ScreenSwapState): void {
-    const children = screen.rootChildren;
-    if (
-      screen.active
-      && children[screen.footerIndex] === screen.childFooter
-      && children.length === screen.footerIndex + 2
-      && isComponent(children[screen.footerIndex + 1])
-    ) {
-      children.splice(screen.footerIndex, 1);
-      this.adoptFooter(screen, children[screen.footerIndex]);
-      children[screen.footerIndex] = screen.childFooter;
-      return;
-    }
+	private createChildFooter(originalFooter: Component): Component {
+		let childFooter: Component;
+		childFooter = {
+			render: (width) => {
+				const screen = this.screenSwap;
+				if (screen?.active && screen.childFooter === childFooter) {
+					this.syncExternalFooter(screen);
+					if (screen.childFooter !== childFooter) {
+						screen.tui.requestRender();
+						return [];
+					}
+				}
+				return this.renderChildFooter(originalFooter, width);
+			},
+			invalidate: () => originalFooter.invalidate(),
+		};
+		return childFooter;
+	}
 
-    if (children.length !== screen.footerIndex + 1) return;
-    const currentFooter = children[screen.footerIndex];
-    if (!isComponent(currentFooter)) return;
+	private adoptFooter(
+		screen: ScreenSwapState,
+		originalFooter: Component,
+	): void {
+		screen.originalFooter = originalFooter;
+		screen.childFooter = this.createChildFooter(originalFooter);
+	}
 
-    if (screen.active) {
-      if (currentFooter !== screen.childFooter) {
-        this.adoptFooter(screen, currentFooter);
-        children[screen.footerIndex] = screen.childFooter;
-      }
-    } else if (currentFooter !== screen.originalFooter) {
-      this.adoptFooter(screen, currentFooter);
-    }
-  }
+	/** Keep footer ownership correct when another extension calls setFooter(). */
+	private syncExternalFooter(screen: ScreenSwapState): void {
+		const children = screen.footerChildren;
+		if (
+			screen.active &&
+			children[screen.footerIndex] === screen.childFooter &&
+			children.length === screen.footerIndex + 2 &&
+			isComponent(children[screen.footerIndex + 1])
+		) {
+			children.splice(screen.footerIndex, 1);
+			this.adoptFooter(screen, children[screen.footerIndex]);
+			children[screen.footerIndex] = screen.childFooter;
+			return;
+		}
 
-  private swapToSubagentScreen(): boolean {
-    const screen = this.screenSwap;
-    if (!screen) return false;
-    this.syncExternalFooter(screen);
+		if (children.length !== screen.footerIndex + 1) return;
+		const currentFooter = children[screen.footerIndex];
+		if (!isComponent(currentFooter)) return;
 
-    const currentChat = screen.rootChildren[screen.chatIndex];
-    const currentPending = screen.rootChildren[screen.pendingIndex];
-    const currentStatus = screen.rootChildren[screen.statusIndex];
-    const currentFooter = screen.rootChildren[screen.footerIndex];
-    const chatCompatible = currentChat === screen.originalChat || currentChat === screen.transcript;
-    const pendingCompatible = currentPending === screen.originalPending || currentPending === screen.emptyPending;
-    const statusCompatible = currentStatus === screen.originalStatus || currentStatus === screen.emptyStatus;
-    const footerCompatible = currentFooter === screen.originalFooter || currentFooter === screen.childFooter;
-    if (!chatCompatible || !pendingCompatible || !statusCompatible || !footerCompatible) return false;
+		if (screen.active) {
+			if (currentFooter !== screen.childFooter) {
+				this.adoptFooter(screen, currentFooter);
+				children[screen.footerIndex] = screen.childFooter;
+			}
+		} else if (currentFooter !== screen.originalFooter) {
+			this.adoptFooter(screen, currentFooter);
+		}
+	}
 
-    screen.rootChildren[screen.chatIndex] = screen.transcript;
-    screen.rootChildren[screen.pendingIndex] = screen.emptyPending;
-    screen.rootChildren[screen.statusIndex] = screen.emptyStatus;
-    screen.rootChildren[screen.footerIndex] = screen.childFooter;
-    screen.active = true;
-    return true;
-  }
+	private swapToSubagentScreen(): boolean {
+		const screen = this.screenSwap;
+		if (!screen) return false;
+		this.syncExternalFooter(screen);
 
-  private restoreMainScreen(): boolean {
-    const screen = this.screenSwap;
-    if (!screen?.active) return false;
-    this.syncExternalFooter(screen);
+		const currentChat = screen.chatChildren[screen.chatIndex];
+		const currentPending = screen.pendingChildren[screen.pendingIndex];
+		const currentStatus = screen.statusChildren[screen.statusIndex];
+		const currentFooter = screen.footerChildren[screen.footerIndex];
+		const chatCompatible =
+			currentChat === screen.originalChat || currentChat === screen.transcript;
+		const pendingCompatible =
+			currentPending === screen.originalPending ||
+			currentPending === screen.emptyPending;
+		const statusCompatible =
+			currentStatus === screen.originalStatus ||
+			currentStatus === screen.emptyStatus;
+		const footerCompatible =
+			currentFooter === screen.originalFooter ||
+			currentFooter === screen.childFooter;
+		if (
+			!chatCompatible ||
+			!pendingCompatible ||
+			!statusCompatible ||
+			!footerCompatible
+		)
+			return false;
 
-    let restored = false;
-    if (screen.rootChildren[screen.chatIndex] === screen.transcript) {
-      screen.rootChildren[screen.chatIndex] = screen.originalChat;
-      restored = true;
-    }
-    if (screen.rootChildren[screen.pendingIndex] === screen.emptyPending) {
-      screen.rootChildren[screen.pendingIndex] = screen.originalPending;
-      restored = true;
-    }
-    if (screen.rootChildren[screen.statusIndex] === screen.emptyStatus) {
-      screen.rootChildren[screen.statusIndex] = screen.originalStatus;
-      restored = true;
-    }
-    if (screen.rootChildren[screen.footerIndex] === screen.childFooter) {
-      screen.rootChildren[screen.footerIndex] = screen.originalFooter;
-      restored = true;
-    }
-    screen.active = false;
-    return restored;
-  }
+		screen.chatChildren[screen.chatIndex] = screen.transcript;
+		screen.pendingChildren[screen.pendingIndex] = screen.emptyPending;
+		screen.statusChildren[screen.statusIndex] = screen.emptyStatus;
+		screen.footerChildren[screen.footerIndex] = screen.childFooter;
+		screen.active = true;
+		return true;
+	}
 
-  private warnUnsupportedLayout(): void {
-    if (this.layoutWarningShown) return;
-    this.layoutWarningShown = true;
-    this.uiCtx?.notify(
-      "Subagent screen switching is unavailable: unsupported Pi TUI layout",
-      "warning",
-    );
-  }
+	private restoreMainScreen(): boolean {
+		const screen = this.screenSwap;
+		if (!screen?.active) return false;
+		this.syncExternalFooter(screen);
 
-  private clearScrollbackAndRender(): void {
-    const tui = this.screenSwap?.tui ?? this.selectorTui;
-    if (!tui) return;
-    try { tui.terminal.write(CLEAR_SCROLLBACK_SEQUENCE); } catch { /* best effort */ }
-    tui.requestRender(true);
-  }
+		let restored = false;
+		if (screen.chatChildren[screen.chatIndex] === screen.transcript) {
+			screen.chatChildren[screen.chatIndex] = screen.originalChat;
+			restored = true;
+		}
+		if (screen.pendingChildren[screen.pendingIndex] === screen.emptyPending) {
+			screen.pendingChildren[screen.pendingIndex] = screen.originalPending;
+			restored = true;
+		}
+		if (screen.statusChildren[screen.statusIndex] === screen.emptyStatus) {
+			screen.statusChildren[screen.statusIndex] = screen.originalStatus;
+			restored = true;
+		}
+		if (screen.footerChildren[screen.footerIndex] === screen.childFooter) {
+			screen.footerChildren[screen.footerIndex] = screen.originalFooter;
+			restored = true;
+		}
+		screen.active = false;
+		return restored;
+	}
 
-  private requestRender(): void {
-    const tui = this.screenSwap?.tui ?? this.selectorTui;
-    tui?.requestRender();
-  }
+	private warnUnsupportedLayout(): void {
+		if (this.layoutWarningShown) return;
+		this.layoutWarningShown = true;
+		this.uiCtx?.notify(
+			"Subagent screen switching is unavailable: unsupported Pi TUI layout",
+			"warning",
+		);
+	}
 
-  private renderSelector(tui: TUI, theme: Theme): string[] {
-    const entries = this.navigationEntries();
-    const focusId = this.listFocused ? this.highlightedAgentId : this.selectedAgentId;
-    const focusIndex = Math.max(0, entries.findIndex(entry => entry.id === focusId));
-    const maxVisible = Math.max(2, Math.floor(tui.terminal.rows / 3));
-    const visibleCount = Math.min(entries.length, maxVisible);
-    const maxStart = Math.max(0, entries.length - visibleCount);
-    const start = Math.min(maxStart, Math.max(0, focusIndex - Math.floor(visibleCount / 2)));
-    const end = start + visibleCount;
-    const visibleEntries = entries.slice(start, end);
+	private clearScrollbackAndRender(): void {
+		const tui = this.screenSwap?.tui ?? this.selectorTui;
+		if (!tui) return;
+		try {
+			tui.terminal.write(CLEAR_SCROLLBACK_SEQUENCE);
+		} catch {
+			/* best effort */
+		}
+		tui.requestRender(true);
+	}
 
-    const hint = this.listFocused
-      ? "↑↓ choose · Enter select · Esc editor"
-      : "empty editor + ↓ to choose";
-    const lines = [theme.fg("dim", `Agents · ${hint}`)];
-    const spinnerFrame = SPINNER[this.spinnerFrame];
+	private requestRender(): void {
+		const tui = this.screenSwap?.tui ?? this.selectorTui;
+		tui?.requestRender();
+	}
 
-    if (start > 0) {
-      lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
-    }
+	private renderSelector(tui: TUI, theme: Theme): string[] {
+		const entries = this.navigationEntries();
+		const focusId = this.listFocused
+			? this.highlightedAgentId
+			: this.selectedAgentId;
+		const focusIndex = Math.max(
+			0,
+			entries.findIndex((entry) => entry.id === focusId),
+		);
+		const maxVisible = Math.max(2, Math.floor(tui.terminal.rows / 3));
+		const visibleCount = Math.min(entries.length, maxVisible);
+		const maxStart = Math.max(0, entries.length - visibleCount);
+		const start = Math.min(
+			maxStart,
+			Math.max(0, focusIndex - Math.floor(visibleCount / 2)),
+		);
+		const end = start + visibleCount;
+		const visibleEntries = entries.slice(start, end);
 
-    for (const entry of visibleEntries) {
-      const active = entry.id === this.selectedAgentId;
-      const highlighted = this.listFocused && entry.id === this.highlightedAgentId;
-      const circle = active ? theme.fg("accent", "●") : theme.fg("dim", "○");
-      const focus = highlighted ? theme.fg("accent", "›") : " ";
-      if (!entry.record) {
-        const label = highlighted ? theme.bold("Main agent") : "Main agent";
-        lines.push(truncateToWidth(`${focus} ${circle} ${label}`, tui.terminal.columns));
-        continue;
-      }
+		const hint = this.listFocused
+			? "↑↓ choose · Enter select · Esc editor"
+			: "empty editor + ↓ to choose";
+		const lines = [theme.fg("dim", `Agents · ${hint}`)];
+		const spinnerFrame = SPINNER[this.spinnerFrame];
 
-      const record = entry.record;
-      const icon = statusIcon(record, spinnerFrame);
-      const shortId = record.id.slice(0, 8);
-      const label = `${record.display.type} ${shortId}`;
-      const status = record.lifecycle.status === "running" ? "" : ` ${record.lifecycle.status}`;
-      const text = highlighted ? theme.bold(label) : label;
-      lines.push(truncateToWidth(
-        `${focus} ${circle} ${theme.fg(record.lifecycle.status === "running" ? "accent" : "dim", icon)} ${text}${theme.fg("dim", status)}`,
-        tui.terminal.columns,
-      ));
-    }
+		if (start > 0) {
+			lines.push(theme.fg("dim", `  ↑ ${start} hidden`));
+		}
 
-    if (end < entries.length) {
-      lines.push(theme.fg("dim", `  ↓ ${entries.length - end} hidden`));
-    }
+		for (const entry of visibleEntries) {
+			const active = entry.id === this.selectedAgentId;
+			const highlighted =
+				this.listFocused && entry.id === this.highlightedAgentId;
+			const circle = active ? theme.fg("accent", "●") : theme.fg("dim", "○");
+			const focus = highlighted ? theme.fg("accent", "›") : " ";
+			if (!entry.record) {
+				const label = highlighted ? theme.bold("Main agent") : "Main agent";
+				lines.push(
+					truncateToWidth(`${focus} ${circle} ${label}`, tui.terminal.columns),
+				);
+				continue;
+			}
 
-    return lines;
-  }
+			const record = entry.record;
+			const icon = statusIcon(record, spinnerFrame);
+			const shortId = record.id.slice(0, 8);
+			const label = `${record.display.type} ${shortId}`;
+			const status =
+				record.lifecycle.status === "running"
+					? ""
+					: ` ${record.lifecycle.status}`;
+			const text = highlighted ? theme.bold(label) : label;
+			lines.push(
+				truncateToWidth(
+					`${focus} ${circle} ${theme.fg(record.lifecycle.status === "running" ? "accent" : "dim", icon)} ${text}${theme.fg("dim", status)}`,
+					tui.terminal.columns,
+				),
+			);
+		}
 
-  private renderChildFooter(originalFooter: Component, width: number): string[] {
-    const originalLines = originalFooter.render(width);
-    const record = this.selectedAgentId
-      ? this.manager.getRecord(this.selectedAgentId)
-      : undefined;
-    const theme = this.uiCtx?.theme;
-    if (!record || !theme) return originalLines;
+		if (end < entries.length) {
+			lines.push(theme.fg("dim", `  ↓ ${entries.length - end} hidden`));
+		}
 
-    const childStats = renderAgentFooterStats(record, theme, width);
-    if (originalFooter.constructor?.name === "FooterComponent" && originalLines.length >= 2) {
-      return [originalLines[0], childStats, ...originalLines.slice(2)];
-    }
-    return [childStats];
-  }
+		return lines;
+	}
 
-  private renderActiveTranscript(width: number): string[] {
-    const record = this.selectedAgentId
-      ? this.manager.getRecord(this.selectedAgentId)
-      : undefined;
-    if (!record) return [];
+	private renderChildFooter(
+		originalFooter: Component,
+		width: number,
+	): string[] {
+		const originalLines = originalFooter.render(width);
+		const record = this.selectedAgentId
+			? this.manager.getRecord(this.selectedAgentId)
+			: undefined;
+		const theme = this.uiCtx?.theme;
+		if (!record || !theme) return originalLines;
 
-    const theme = this.uiCtx?.theme;
-    if (!theme) return [];
-    return this.buildTranscriptLines(record, theme, width)
-      .map(line => truncateToWidth(line, width));
-  }
+		const childStats = renderAgentFooterStats(record, theme, width);
+		if (
+			originalFooter.constructor?.name === "FooterComponent" &&
+			originalLines.length >= 2
+		) {
+			return [originalLines[0], childStats, ...originalLines.slice(2)];
+		}
+		return [childStats];
+	}
 
-  private buildTranscriptLines(record: AgentRecord, theme: Theme, width: number): string[] {
-    const shortId = record.id.slice(0, 8);
-    const status = record.lifecycle.status;
-    const lines: string[] = [
-      theme.fg("accent", theme.bold(`${record.display.type} · ${shortId} · ${status}`)),
-      theme.fg("dim", "─".repeat(Math.max(1, width))),
-    ];
+	private renderActiveTranscript(width: number): string[] {
+		const record = this.selectedAgentId
+			? this.manager.getRecord(this.selectedAgentId)
+			: undefined;
+		if (!record) return [];
 
-    const session = record.execution.session;
-    if (!session) {
-      lines.push(theme.fg("dim", status === "queued" ? "Waiting in queue…" : "Starting agent session…"));
-      return lines;
-    }
+		const theme = this.uiCtx?.theme;
+		if (!theme) return [];
+		return this.buildTranscriptLines(record, theme, width).map((line) =>
+			truncateToWidth(line, width),
+		);
+	}
 
-    const messages = session.messages as unknown as MessageLike[];
-    for (const message of messages) {
-      this.appendMessage(lines, message, theme, width);
-    }
+	private buildTranscriptLines(
+		record: AgentRecord,
+		theme: Theme,
+		width: number,
+	): string[] {
+		const shortId = record.id.slice(0, 8);
+		const status = record.lifecycle.status;
+		const lines: string[] = [
+			theme.fg(
+				"accent",
+				theme.bold(`${record.display.type} · ${shortId} · ${status}`),
+			),
+			theme.fg("dim", "─".repeat(Math.max(1, width))),
+		];
 
-    const streamingMessage = (session.agent.state as unknown as { streamingMessage?: MessageLike }).streamingMessage;
-    if (streamingMessage) {
-      this.appendMessage(lines, streamingMessage, theme, width);
-    }
+		const session = record.execution.session;
+		if (!session) {
+			lines.push(
+				theme.fg(
+					"dim",
+					status === "queued" ? "Waiting in queue…" : "Starting agent session…",
+				),
+			);
+			return lines;
+		}
 
-    if (record.error) {
-      lines.push(theme.fg("error", `Error: ${record.error}`));
-    }
+		const messages = session.messages as unknown as MessageLike[];
+		for (const message of messages) {
+			this.appendMessage(lines, message, theme, width);
+		}
 
-    return lines;
-  }
+		const streamingMessage = (
+			session.agent.state as unknown as { streamingMessage?: MessageLike }
+		).streamingMessage;
+		if (streamingMessage) {
+			this.appendMessage(lines, streamingMessage, theme, width);
+		}
 
-  private appendMessage(lines: string[], message: MessageLike, theme: Theme, width: number): void {
-    switch (message.role) {
-      case "user": {
-        const text = textFromContent(message.content);
-        const images = imageCount(message.content);
-        if (!text && images === 0) return;
-        lines.push("");
-        lines.push(theme.fg("accent", theme.bold("User")));
-        if (text) appendWrapped(lines, text, width);
-        if (images > 0) {
-          appendWrapped(lines, theme.fg("dim", `[${images} image${images === 1 ? "" : "s"}]`), width);
-        }
-        return;
-      }
-      case "assistant": {
-        if (!Array.isArray(message.content)) return;
-        lines.push("");
-        lines.push(theme.bold("Assistant"));
-        for (const item of message.content as Array<Record<string, unknown>>) {
-          if (item.type === "text" && typeof item.text === "string") {
-            appendWrapped(lines, item.text, width);
-          } else if (item.type === "thinking" && typeof item.thinking === "string") {
-            lines.push(theme.fg("dim", "  Thinking"));
-            appendWrapped(lines, theme.fg("dim", item.thinking), width);
-          } else if (item.type === "toolCall") {
-            appendWrapped(lines, theme.fg("dim", formatToolCall(item)), width);
-          }
-        }
-        return;
-      }
-      case "toolResult": {
-        const text = textFromContent(message.content);
-        const clipped = text.length > TOOL_RESULT_CHAR_LIMIT
-          ? `${text.slice(0, TOOL_RESULT_CHAR_LIMIT)}\n… (tool result truncated)`
-          : text;
-        const icon = message.isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        lines.push(`${icon} ${theme.fg("dim", message.toolName ?? "tool")}`);
-        if (clipped) appendWrapped(lines, theme.fg("dim", clipped), width);
-        return;
-      }
-      case "bashExecution": {
-        lines.push("");
-        lines.push(theme.fg("accent", `$ ${message.command ?? ""}`));
-        if (message.output) appendWrapped(lines, message.output, width);
-        return;
-      }
-      case "compactionSummary":
-      case "branchSummary": {
-        lines.push("");
-        lines.push(theme.fg("dim", message.role === "compactionSummary" ? "Compaction summary" : "Branch summary"));
-        if (message.summary) appendWrapped(lines, message.summary, width);
-        return;
-      }
-    }
-  }
+		if (record.error) {
+			lines.push(theme.fg("error", `Error: ${record.error}`));
+		}
 
-  update(): void {
-    if (!this.uiCtx) return;
+		return lines;
+	}
 
-    const records = this.manager.listAgents();
-    if (this.screenSwap) this.syncExternalFooter(this.screenSwap);
-    if (records.length === 0) {
-      this.selectedAgentId = null;
-      this.highlightedAgentId = null;
-      this.listFocused = false;
-      if (this.restoreMainScreen()) this.clearScrollbackAndRender();
-      this.unregisterWidgets();
-      if (this.refreshTimer) {
-        clearInterval(this.refreshTimer);
-        this.refreshTimer = undefined;
-      }
-      return;
-    }
+	private appendMessage(
+		lines: string[],
+		message: MessageLike,
+		theme: Theme,
+		width: number,
+	): void {
+		switch (message.role) {
+			case "user": {
+				const text = textFromContent(message.content);
+				const images = imageCount(message.content);
+				if (!text && images === 0) return;
+				lines.push("");
+				lines.push(theme.fg("accent", theme.bold("User")));
+				if (text) appendWrapped(lines, text, width);
+				if (images > 0) {
+					appendWrapped(
+						lines,
+						theme.fg("dim", `[${images} image${images === 1 ? "" : "s"}]`),
+						width,
+					);
+				}
+				return;
+			}
+			case "assistant": {
+				if (!Array.isArray(message.content)) return;
+				lines.push("");
+				lines.push(theme.bold("Assistant"));
+				for (const item of message.content as Array<Record<string, unknown>>) {
+					if (item.type === "text" && typeof item.text === "string") {
+						appendWrapped(lines, item.text, width);
+					} else if (
+						item.type === "thinking" &&
+						typeof item.thinking === "string"
+					) {
+						lines.push(theme.fg("dim", "  Thinking"));
+						appendWrapped(lines, theme.fg("dim", item.thinking), width);
+					} else if (item.type === "toolCall") {
+						appendWrapped(lines, theme.fg("dim", formatToolCall(item)), width);
+					}
+				}
+				return;
+			}
+			case "toolResult": {
+				const text = textFromContent(message.content);
+				const clipped =
+					text.length > TOOL_RESULT_CHAR_LIMIT
+						? `${text.slice(0, TOOL_RESULT_CHAR_LIMIT)}\n… (tool result truncated)`
+						: text;
+				const icon = message.isError
+					? theme.fg("error", "✗")
+					: theme.fg("success", "✓");
+				lines.push(`${icon} ${theme.fg("dim", message.toolName ?? "tool")}`);
+				if (clipped) appendWrapped(lines, theme.fg("dim", clipped), width);
+				return;
+			}
+			case "bashExecution": {
+				lines.push("");
+				lines.push(theme.fg("accent", `$ ${message.command ?? ""}`));
+				if (message.output) appendWrapped(lines, message.output, width);
+				return;
+			}
+			case "compactionSummary":
+			case "branchSummary": {
+				lines.push("");
+				lines.push(
+					theme.fg(
+						"dim",
+						message.role === "compactionSummary"
+							? "Compaction summary"
+							: "Branch summary",
+					),
+				);
+				if (message.summary) appendWrapped(lines, message.summary, width);
+				return;
+			}
+		}
+	}
 
-    if (this.selectedAgentId && !records.some(record => record.id === this.selectedAgentId)) {
-      this.selectedAgentId = null;
-      if (this.restoreMainScreen()) this.clearScrollbackAndRender();
-    }
-    if (this.highlightedAgentId && !records.some(record => record.id === this.highlightedAgentId)) {
-      this.highlightedAgentId = this.selectedAgentId;
-    }
+	update(): void {
+		if (!this.uiCtx) return;
 
-    if (!this.selectorRegistered) {
-      this.uiCtx.setWidget(SELECTOR_WIDGET_KEY, (tui, theme) => {
-        this.selectorTui = tui;
-        const selector: Component = {
-          render: () => {
-            this.captureScreen(tui, selector);
-            return this.renderSelector(tui, theme);
-          },
-          invalidate: () => {},
-        };
-        return selector;
-      }, { placement: "belowEditor" });
-      this.selectorRegistered = true;
-    }
+		const records = this.manager.listAgents();
+		if (this.screenSwap) this.syncExternalFooter(this.screenSwap);
+		if (records.length === 0) {
+			this.selectedAgentId = null;
+			this.highlightedAgentId = null;
+			this.listFocused = false;
+			if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+			this.unregisterWidgets();
+			if (this.refreshTimer) {
+				clearInterval(this.refreshTimer);
+				this.refreshTimer = undefined;
+			}
+			return;
+		}
 
-    this.requestRender();
+		if (
+			this.selectedAgentId &&
+			!records.some((record) => record.id === this.selectedAgentId)
+		) {
+			this.selectedAgentId = null;
+			if (this.restoreMainScreen()) this.clearScrollbackAndRender();
+		}
+		if (
+			this.highlightedAgentId &&
+			!records.some((record) => record.id === this.highlightedAgentId)
+		) {
+			this.highlightedAgentId = this.selectedAgentId;
+		}
 
-    if (!this.selectedAgentId && !records.some(record =>
-      record.lifecycle.status === "running" || record.lifecycle.status === "queued"
-    ) && this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
-  }
+		if (!this.selectorRegistered) {
+			this.uiCtx.setWidget(
+				SELECTOR_WIDGET_KEY,
+				(tui, theme) => {
+					this.selectorTui = tui;
+					const selector: Component = {
+						render: () => {
+							this.captureScreen(tui, selector);
+							return this.renderSelector(tui, theme);
+						},
+						invalidate: () => {},
+					};
+					return selector;
+				},
+				{ placement: "belowEditor" },
+			);
+			this.selectorRegistered = true;
+		}
 
-  private unregisterWidgets(): void {
-    if (this.selectorRegistered) {
-      this.uiCtx?.setWidget(SELECTOR_WIDGET_KEY, undefined);
-      this.selectorRegistered = false;
-      this.selectorTui = undefined;
-    }
-  }
+		this.requestRender();
 
-  dispose(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
-    if (this.restoreMainScreen()) this.requestRender();
-    this.unregisterWidgets();
-    this.screenSwap = undefined;
-    this.restoreEditor?.();
-    this.restoreEditor = undefined;
-    this.uiCtx = undefined;
-  }
+		if (
+			!this.selectedAgentId &&
+			!records.some(
+				(record) =>
+					record.lifecycle.status === "running" ||
+					record.lifecycle.status === "queued",
+			) &&
+			this.refreshTimer
+		) {
+			clearInterval(this.refreshTimer);
+			this.refreshTimer = undefined;
+		}
+	}
+
+	private unregisterWidgets(): void {
+		if (this.selectorRegistered) {
+			this.uiCtx?.setWidget(SELECTOR_WIDGET_KEY, undefined);
+			this.selectorRegistered = false;
+			this.selectorTui = undefined;
+		}
+	}
+
+	dispose(): void {
+		if (this.refreshTimer) {
+			clearInterval(this.refreshTimer);
+			this.refreshTimer = undefined;
+		}
+		if (this.restoreMainScreen()) this.requestRender();
+		this.unregisterWidgets();
+		this.screenSwap = undefined;
+		this.restoreEditor?.();
+		this.restoreEditor = undefined;
+		this.uiCtx = undefined;
+	}
 }
