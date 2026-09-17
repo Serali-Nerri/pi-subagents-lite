@@ -17,6 +17,7 @@ import type { SubagentsConfig, SessionModelOverrides } from "../models/model-pre
 import { resolveModel } from "../models/model-precedence.js";
 import type { AgentWidget } from "../ui/agent-widget.js";
 import type { AgentManager } from "../agents/agent-manager.js";
+import type { AgentNavigator } from "../ui/agent-navigator.js";
 import { CONFIG_AGENT_NON_MODEL_KEYS } from "./types.js";
 import type { SystemPromptMode } from "../agents/types.js";
 import type { ThinkingLevel } from "../types.js";
@@ -46,6 +47,8 @@ export interface ResolvedAgentSettings {
   readonly widgetMaxLinesCompact: number;
   readonly widgetCompact: boolean;
   readonly widgetShortcut: boolean;
+  /** Whether the agent selector below the editor is shown (default false). */
+  readonly showAgentSelector: boolean;
   readonly widgetDescLengthFull: number;
   readonly widgetDescLengthCompact: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
@@ -84,6 +87,7 @@ export interface ResolvedAgentSettings {
 export interface ConfigStoreDeps {
   widget?: AgentWidget;
   manager?: AgentManager;
+  navigator?: AgentNavigator;
 }
 
 export class ConfigStore {
@@ -92,6 +96,7 @@ export class ConfigStore {
   private sessionShowCost: boolean | undefined;
   private widget?: AgentWidget;
   private manager?: AgentManager;
+  private navigator?: AgentNavigator;
   /** Previous tool-expansion state, for ctrl+o compact sync. */
   private lastToolsExpanded: boolean | undefined;
 
@@ -120,6 +125,7 @@ export class ConfigStore {
       widgetMaxLinesCompact,
       widgetCompact: a.widgetCompact === true,
       widgetShortcut: a.widgetShortcut === true,
+      showAgentSelector: a.showAgentSelector === true,
       widgetDescLengthFull: a.widgetDescLengthFull ?? 50,
       widgetDescLengthCompact: a.widgetDescLengthCompact ?? 30,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
@@ -276,6 +282,11 @@ export class ConfigStore {
         this.config.agent.outputThinkingBufferSize = size;
         this.persist();
       },
+      setShowAgentSelector: (enabled: boolean): void => {
+        this.config.agent.showAgentSelector = enabled;
+        this.persist();
+        this.navigator?.setVisible(enabled);
+      },
     },
     widget: {
       setCompact: (enabled: boolean): void => {
@@ -410,6 +421,7 @@ export class ConfigStore {
   setDeps(deps: ConfigStoreDeps): void {
     if (deps.widget !== undefined) this.widget = deps.widget;
     if (deps.manager !== undefined) this.manager = deps.manager;
+    if (deps.navigator !== undefined) this.navigator = deps.navigator;
     this.syncAllDeps();
   }
 
@@ -417,6 +429,7 @@ export class ConfigStore {
   dispose(): void {
     this.widget = undefined;
     this.manager = undefined;
+    this.navigator = undefined;
   }
 
   // ── Private helpers ────────────────────────────────────────────
@@ -467,6 +480,7 @@ export class ConfigStore {
 
   /** Full re-sync of all present deps. Used by reload/setDeps. */
   private syncAllDeps(): void {
+    this.navigator?.setVisible(this.agent.showAgentSelector);
     if (this.widget) {
       this.widget.setShowCost(this.agent.showCost);
       this.syncWidgetSettings();

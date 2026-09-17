@@ -17,6 +17,7 @@ export const CONFIG_AGENT_NON_MODEL_KEYS = [
   "widgetDescLengthCompact",
   "widgetCompact",
   "widgetShortcut",
+  "showAgentSelector",
   "systemPromptMode",
   "includeContextFiles",
   "defaultThinking",

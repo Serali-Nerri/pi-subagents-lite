@@ -383,6 +383,7 @@ export class AgentNavigator {
 	private spinnerFrame = 0;
 	private refreshTimer: ReturnType<typeof setInterval> | undefined;
 	private selectorRegistered = false;
+	private visible = true;
 	private selectorTui: TUI | undefined;
 	private screenSwap: ScreenSwapState | undefined;
 	private layoutWarningShown = false;
@@ -481,6 +482,7 @@ export class AgentNavigator {
 	 * Escape or Up above Main returns input to the editor.
 	 */
 	handleTerminalInput(data: string): { consume?: boolean } | undefined {
+		if (!this.visible) return undefined;
 		const entries = this.navigationEntries();
 		if (entries.length <= 1) return undefined;
 
@@ -1082,6 +1084,12 @@ export class AgentNavigator {
 			this.highlightedAgentId = this.selectedAgentId;
 		}
 
+		if (!this.visible) {
+			this.unregisterWidgets();
+			this.stopSpinnerWhenIdle();
+			return;
+		}
+
 		if (!this.selectorRegistered) {
 			this.uiCtx.setWidget(
 				SELECTOR_WIDGET_KEY,
@@ -1103,9 +1111,14 @@ export class AgentNavigator {
 
 		this.requestRender();
 
+		this.stopSpinnerWhenIdle();
+	}
+
+	/** Stop the refresh timer once nothing is selected and nothing is running. */
+	private stopSpinnerWhenIdle(): void {
 		if (
 			!this.selectedAgentId &&
-			!records.some(
+			!this.manager.listAgents().some(
 				(record) =>
 					record.lifecycle.status === "running" ||
 					record.lifecycle.status === "queued",
@@ -1115,6 +1128,22 @@ export class AgentNavigator {
 			clearInterval(this.refreshTimer);
 			this.refreshTimer = undefined;
 		}
+	}
+
+	/** Whether the selector list is rendered below the editor. */
+	isVisible(): boolean {
+		return this.visible;
+	}
+
+	/** Show or hide the selector list. Hidden is the default for new sessions. */
+	setVisible(visible: boolean): void {
+		if (this.visible === visible) return;
+		this.visible = visible;
+		if (!visible) {
+			this.listFocused = false;
+			this.highlightedAgentId = this.selectedAgentId;
+		}
+		this.update();
 	}
 
 	private unregisterWidgets(): void {

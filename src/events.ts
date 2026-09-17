@@ -84,6 +84,9 @@ export function ensureManagerAndWidget(): void {
       getManager()!,
       async (agentId, text) => getCoordinator()?.interact(agentId, text) ?? false,
     ));
+    // Selector visibility follows config (default: hidden) and is pushed on
+    // every setDeps/sync, so a menu or /subagents toggle takes effect at once.
+    getStore().setDeps({ navigator: getNavigator()! });
   }
   getManager()?.setOnRemove(() => getNavigator()?.update());
 }

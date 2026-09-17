@@ -740,3 +740,47 @@ describe("AgentNavigator", () => {
 		);
 	});
 });
+
+describe("selector visibility", () => {
+	let navigator: AgentNavigator;
+
+	afterEach(() => {
+		navigator?.dispose();
+		vi.useRealTimers();
+	});
+
+	it("stays unregistered when hidden before the first render", () => {
+		const ui = makeUI({ value: "" });
+		navigator = new AgentNavigator(makeManager([makeRecord()]));
+		navigator.setVisible(false);
+		navigator.setUICtx(ui.ctx as any);
+
+		expect(navigator.isVisible()).toBe(false);
+		expect(ui.widgets.has("agent-navigator-selector")).toBe(false);
+	});
+
+	it("registers the widget when shown and drops it when hidden again", () => {
+		const ui = makeUI({ value: "" });
+		navigator = new AgentNavigator(makeManager([makeRecord()]));
+		navigator.setUICtx(ui.ctx as any);
+
+		expect(ui.widgets.has("agent-navigator-selector")).toBe(true);
+
+		navigator.setVisible(false);
+		expect(ui.widgets.has("agent-navigator-selector")).toBe(false);
+
+		navigator.setVisible(true);
+		expect(ui.widgets.has("agent-navigator-selector")).toBe(true);
+	});
+
+	it("leaves editor keys alone while hidden", () => {
+		const ui = makeUI({ value: "" });
+		navigator = new AgentNavigator(makeManager([makeRecord()]));
+		navigator.setUICtx(ui.ctx as any);
+
+		expect(navigator.handleTerminalInput("\x1b[B")).toBeDefined();
+
+		navigator.setVisible(false);
+		expect(navigator.handleTerminalInput("\x1b[B")).toBeUndefined();
+	});
+});

@@ -6,7 +6,7 @@ import { executeAgentStatusTool } from "./agents/agent-status.js";
 import { renderAgentToolCall, renderAgentToolResult, renderSubagentResult } from "./ui/renderer.js";
 import { showAgentsMainMenu } from "./ui/menu/menus.js";
 import { listModelOptionsForMenus } from "./models/model-scope.js";
-import { getStore } from "./shell.js";
+import { getManager, getNavigator, getStore } from "./shell.js";
 
 // ============================================================================
 // Agent tool registration helper — dynamic enum for agent types
@@ -96,6 +96,27 @@ export function registerTools(pi: ExtensionAPI): void {
   });
 
   // Command registration
+  pi.registerCommand("subagents", {
+    description: "Show or hide the subagent selector below the editor (on|off)",
+    handler: async (args: string, _ctx: ExtensionCommandContext) => {
+      const navigator = getNavigator();
+      if (!navigator) {
+        _ctx.ui.notify("Subagents are not initialized in this session", "warning");
+        return;
+      }
+      const mode = args.trim().toLowerCase();
+      const wanted = mode === "on" ? true : mode === "off" ? false : !navigator.isVisible();
+      navigator.setVisible(wanted);
+      const records = getManager()?.listAgents() ?? [];
+      const running = records.filter((r) => r.lifecycle.status === "running" || r.lifecycle.status === "queued").length;
+      const finished = records.length - running;
+      const summary = records.length === 0
+        ? "no subagents in this session"
+        : `${running} active · ${finished} finished (kept ~10 min)`;
+      _ctx.ui.notify(`Subagent selector ${wanted ? "shown" : "hidden"} — ${summary}`, "info");
+    },
+  });
+
   pi.registerCommand("agents", {
     description: "Manage subagents: spawn agents, model settings, concurrency, briefing, and agent types",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {

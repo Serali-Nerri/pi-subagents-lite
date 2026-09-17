@@ -360,9 +360,15 @@ describe("command registration", () => {
     expect(agentsCmd!.description).toBeDefined();
   });
 
-  it("registers only /agents command", () => {
+  it("registers /subagents command", () => {
+    const subagentsCmd = api.commands.find((c) => c.name === "subagents");
+    expect(subagentsCmd).toBeDefined();
+    expect(subagentsCmd!.description).toContain("selector");
+  });
+
+  it("registers only /agents and /subagents commands", () => {
     const cmdNames = api.commands.map((c) => c.name).sort();
-    expect(cmdNames).toEqual(["agents"]);
+    expect(cmdNames).toEqual(["agents", "subagents"]);
   });
 });
 

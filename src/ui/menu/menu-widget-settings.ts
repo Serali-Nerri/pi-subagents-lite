@@ -37,6 +37,11 @@ function buildStatConfig(store: ReturnType<typeof getStore>) {
 export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
   const statConfig = buildStatConfig(store);
+  const selectorConfig = {
+    label: "Show agent selector",
+    get: () => store.agent.showAgentSelector,
+    set: (v: boolean) => store.mutate.agent.setShowAgentSelector(v),
+  };
 
   const onChange = (id: string, newValue: string) => {
     const stat = statConfig.get(id);
@@ -50,6 +55,10 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
       case "compact":
         store.mutate.widget.setCompact(newValue === "ON");
         ctx.ui.notify(`Force compact mode ${newValue}`, "info");
+        break;
+      case "showAgentSelector":
+        selectorConfig.set(newValue === "ON");
+        ctx.ui.notify(`${selectorConfig.label} ${newValue}`, "info");
         break;
       case "shortcut":
         store.mutate.widget.setShortcut(newValue === "ON");
@@ -82,6 +91,13 @@ export async function showWidgetSettingsMenu(ctx: ExtensionCommandContext): Prom
     }));
 
     const items: SettingItem[] = [
+      {
+        id: "showAgentSelector",
+        label: selectorConfig.label,
+        currentValue: selectorConfig.get() ? "ON" : "OFF",
+        values: ["ON", "OFF"],
+        description: "Render the subagent selector below the editor. Off by default; /subagents toggles it for the current session.",
+      },
       {
         id: "compact",
         label: "Force compact mode",

@@ -5,7 +5,7 @@
  * No state.ts / config-io / config-mutator mocking — the store owns its state.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ConfigStore, type ConfigIO } from "../../src/config/config-store.ts";
 import type { AgentWidget } from "../../src/ui/agent-widget.ts";
 import type { AgentManager } from "../../src/agents/agent-manager.ts";
@@ -23,6 +23,7 @@ function defaultConfig(): SubagentsConfig {
       widgetDescLengthCompact: 30,
       widgetCompact: false,
       widgetShortcut: false,
+      showAgentSelector: false,
       systemPromptMode: "replace",
       includeContextFiles: true,
       disableDefaultAgents: false,
@@ -724,4 +725,28 @@ describe("ConfigStore outputThinkingBufferSize", () => {
     expect(snap.outputThinkingBufferSize).toBe(500);
     expect(snap.Explore).toBeUndefined();
   });
+});
+
+describe("agent selector visibility", () => {
+	it("defaults to hidden and follows config", () => {
+		const store = new ConfigStore(memIO().io);
+		expect(store.agent.showAgentSelector).toBe(false);
+
+		const config = defaultConfig();
+		config.agent.showAgentSelector = true;
+		expect(new ConfigStore({ load: () => config, save: () => {} }).agent.showAgentSelector).toBe(true);
+	});
+
+	it("pushes visibility to the navigator dependency and persists the change", () => {
+		const { io, current } = memIO();
+		const store = new ConfigStore(io);
+		const navigator = { setVisible: vi.fn() } as unknown as import("../../src/ui/agent-navigator.ts").AgentNavigator;
+
+		store.setDeps({ navigator });
+		expect(navigator.setVisible).toHaveBeenCalledWith(false);
+
+		store.mutate.agent.setShowAgentSelector(true);
+		expect(navigator.setVisible).toHaveBeenLastCalledWith(true);
+		expect(current().agent.showAgentSelector).toBe(true);
+	});
 });

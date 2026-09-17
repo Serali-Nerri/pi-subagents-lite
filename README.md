@@ -271,10 +271,22 @@ Management menu with three sections:
   - **Spawn options** — force background, grace turns, default max turns, default thinking, disable default agents
   - **System prompt** — mode, custom prompt file, include AGENTS.md, load skills/extensions implicitly
   - **Concurrency** — default limit, per-provider and per-model slots (with search), reset to defaults
-  - **Widget settings** — force compact, max lines, description length, thinking buffer size, ctrl+o shortcut, usage stats (toggle tools, turns, input/output tokens, context %, cost, time)
+  - **Widget settings** — show agent selector, force compact, max lines, description length, thinking buffer size, ctrl+o shortcut, usage stats (toggle tools, turns, input/output tokens, context %, cost, time)
 - **Debug** — agent types, generated briefing, and runtime diagnostics
 
+### `/subagents`
+
+`/subagents`, `/subagents on`, `/subagents off` — show or hide the agent selector for the current session. See [Agent selector](#agent-selector).
+
 ## Interface
+
+### Agent selector
+
+A list below the editor showing `Main agent` plus every subagent known to the session (running, queued, and recently finished). It is the entry point for switching into a subagent screen: `↓` enters the list, `↑`/`↓` move, `Enter` switches, `Esc` returns to the editor.
+
+**Hidden by default.** While hidden the list is not rendered and `↓`/`↑` remain with the editor, so nothing intercepts normal typing. Toggle it with `/subagents` (`on`/`off` also accepted) for the current session, or set `showAgentSelector` to make it the default (`/agents` → Settings → Widget settings writes that key).
+
+Finished agents stay listed until the manager drops their record — terminal status, finished more than 10 minutes ago, and the result already read by the model. `/reload` or restarting pi clears the list immediately.
 
 ### Live widget
 
@@ -335,6 +347,7 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
     "widgetDescLengthFull": 50,
     "widgetCompact": true,
     "widgetShortcut": false,
+    "showAgentSelector": false,
     "systemPromptMode": "inherit",
     "includeContextFiles": true,
     "loadSkillsImplicitly": false,
@@ -366,6 +379,7 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
 | `widgetDescLengthCompact` | `30` | Max description length in compact mode. |
 | `widgetCompact` | `false` | Force compact mode regardless of ctrl+o state. |
 | `widgetShortcut` | `false` | When ON, ctrl+o (tool expansion toggle) syncs with widget compact mode. When OFF, compact is manual via `widgetCompact`. |
+| `showAgentSelector` | `false` | Render the subagent selector list below the editor. Off by default; `/subagents` toggles the current session without touching this key. |
 | `outputThinkingBufferSize` | `200` | Thinking buffer ring size in chars. `0` = OFF. Flushes to output log at sentence boundaries. |
 
 ### Stats visibility

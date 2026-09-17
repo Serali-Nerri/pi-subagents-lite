@@ -26,6 +26,8 @@ export interface SubagentsConfig {
     widgetMaxLinesCompact?: number;
     widgetCompact?: boolean;
     widgetShortcut?: boolean;
+    /** Whether the agent selector below the editor is shown. Default: false. */
+    showAgentSelector?: boolean;
     /** System prompt mode: replace (default), inherit parent, or custom file. */
     systemPromptMode?: SystemPromptMode;
     /** Whether to include AGENTS.md context files in the subagent system prompt. Default: true. */
