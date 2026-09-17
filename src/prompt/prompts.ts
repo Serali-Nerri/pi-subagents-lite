@@ -25,6 +25,114 @@ export interface PromptExtras {
 }
 
 /**
+ * Pi's tool metadata block markers, as rendered by buildSystemPrompt.
+ * Both blocks are rewritten for the child's own tool set (see rebuildToolMetadata).
+ */
+const TOOLS_BLOCK_START = "\n\nAvailable tools:\n";
+const TOOLS_BLOCK_END = "\n\nIn addition to the tools above,";
+const GUIDES_BLOCK_START = "\n\nGuidelines:\n";
+const GUIDES_BLOCK_END = "\n\nPi documentation (";
+
+/** Pi's file-exploration guidelines (mirrors buildSystemPrompt). */
+const EXPLORATION_GUIDES = [
+  "Use bash or PowerShell for file operations like listing, searching, and finding files",
+  "Use PowerShell for file operations like listing, searching, and finding files",
+  "Use bash for file operations like ls, rg, find",
+];
+
+/** Guidelines Pi appends to every prompt. */
+const ALWAYS_GUIDES = [
+  "Be concise in your responses",
+  "Show file paths clearly when working with files",
+];
+
+/** One tool of the child's visible tool set. */
+export interface ChildToolMetadata {
+  name: string;
+  /** Tool metadata for a single child tool: Pi omits tools without a snippet. */
+  snippet?: string;
+  guidelines?: string[];
+}
+
+/** Normalize a tool snippet exactly like Pi before rendering it. */
+export function normalizePromptSnippet(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const oneLine = text
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return oneLine.length > 0 ? oneLine : undefined;
+}
+
+/** Locate Pi's four metadata markers; undefined when the prompt has no such block. */
+function metadataBounds(prompt: string): [number, number, number, number] | undefined {
+  const markers = [TOOLS_BLOCK_START, TOOLS_BLOCK_END, GUIDES_BLOCK_START, GUIDES_BLOCK_END];
+  const positions = markers.map((marker) => prompt.indexOf(marker));
+  if (
+    positions.some(
+      (position, index) =>
+        position < 0 ||
+        prompt.indexOf(markers[index], position + 1) !== -1 ||
+        (index > 0 && position <= positions[index - 1]),
+    )
+  ) {
+    return undefined;
+  }
+  return positions as [number, number, number, number];
+}
+
+/**
+ * Rewrite Pi's tool metadata blocks so they describe the child's own tools.
+ *
+ * In inherit mode the child prompt is a copy of the parent's rendered prompt,
+ * so its "Available tools" and "Guidelines" blocks list the parent's tools.
+ * Replace their contents using Pi's own rendering rules and the child's visible
+ * tool set. Returns the prompt unchanged when it carries no complete metadata
+ * block (replace/custom mode, or a prompt written by the user).
+ */
+export function rebuildToolMetadata(
+  prompt: string,
+  tools: readonly ChildToolMetadata[],
+): string {
+  const bounds = metadataBounds(prompt);
+  if (!bounds) return prompt;
+  const [toolStart, toolEnd, guideStart, guideEnd] = bounds;
+
+  const toolLines = tools
+    .filter((tool) => tool.snippet)
+    .map((tool) => `- ${tool.name}: ${tool.snippet}`);
+
+  const names = new Set(tools.map((tool) => tool.name));
+  const guides: string[] = [];
+  const seen = new Set<string>();
+  const addGuide = (guide: string) => {
+    const normalized = guide.trim();
+    if (normalized.length === 0 || seen.has(normalized)) return;
+    seen.add(normalized);
+    guides.push(normalized);
+  };
+  if (!["grep", "find", "ls"].some((name) => names.has(name))) {
+    if (names.has("bash") && names.has("powershell")) addGuide(EXPLORATION_GUIDES[0]);
+    else if (names.has("powershell")) addGuide(EXPLORATION_GUIDES[1]);
+    else if (names.has("bash")) addGuide(EXPLORATION_GUIDES[2]);
+  }
+  for (const tool of tools) {
+    for (const guide of tool.guidelines ?? []) addGuide(guide);
+  }
+  for (const guide of ALWAYS_GUIDES) addGuide(guide);
+
+  return (
+    prompt.slice(0, toolStart) +
+    TOOLS_BLOCK_START +
+    (toolLines.join("\n") || "(none)") +
+    prompt.slice(toolEnd, guideStart) +
+    GUIDES_BLOCK_START +
+    guides.map((guide) => `- ${guide}`).join("\n") +
+    prompt.slice(guideEnd)
+  );
+}
+
+/**
  * Strip pi scaffolding sections from a parent system prompt.
  *
  * In inherit mode, the parent's prompt already contains:

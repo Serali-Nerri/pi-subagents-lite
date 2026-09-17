@@ -30,7 +30,7 @@ import type { AgentUsage } from "./usage.js";
 import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
 import { getActiveScopedModels } from "../models/model-scope.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
+import { buildAgentPrompt, type PromptExtras, type ChildToolMetadata, normalizePromptSnippet, rebuildToolMetadata } from "../prompt/prompts.js";
 import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
 import {
 	type EnvInfo,
@@ -486,6 +486,10 @@ function createResourceLoader(
 		Array.isArray(config.skills) ||
 		Array.isArray(agentConfig?.preloadSkills);
 	const agentDir = getAgentDir();
+	// Mutable holder: the child's tool set is only known after extensions bind,
+	// so the prompt is refreshed before the session renders it (see
+	// refreshChildToolMetadata).
+	const promptRef = { value: systemPrompt };
 	const loaderOpts: ConstructorParameters<typeof DefaultResourceLoader>[0] = {
 		cwd,
 		agentDir,
@@ -494,7 +498,7 @@ function createResourceLoader(
 		noPromptTemplates: true,
 		noThemes: true,
 		noContextFiles: true,
-		systemPromptOverride: () => systemPrompt,
+		systemPromptOverride: () => promptRef.value,
 		appendSystemPromptOverride: () => [],
 		extensionsOverride: buildExtOverride(
 			extensions,
@@ -504,12 +508,47 @@ function createResourceLoader(
 	const loader = new DefaultResourceLoader(loaderOpts);
 	return {
 		loader,
+		promptRef,
 		reloadAndMap: async () => {
 			await loader.reload();
 			const extResult = loader.getExtensions();
 			return { extResult, extToolMap: buildExtToolMap(extResult.extensions) };
 		},
 	};
+}
+
+/**
+ * Re-render Pi's tool metadata blocks for the child's own tool set.
+ *
+ * Inherit mode copies the parent's rendered prompt, whose "Available tools" and
+ * "Guidelines" blocks describe the parent's tools. Pi rebuilds a session prompt
+ * from the resource loader whenever the tool set changes, so updating the loader
+ * copy and re-applying the tool set replaces both blocks with the child's tools.
+ */
+export function refreshChildToolMetadata(
+	loader: DefaultResourceLoader,
+	promptRef: { value: string },
+	session: AgentSession,
+): void {
+	const activeNames = session.getActiveToolNames();
+	const tools: ChildToolMetadata[] = activeNames.map((name) => {
+		const definition = session.getToolDefinition?.(name);
+		return {
+			name,
+			snippet: normalizePromptSnippet(definition?.promptSnippet),
+			guidelines: definition?.promptGuidelines,
+		};
+	});
+	const rebuilt = rebuildToolMetadata(promptRef.value, tools);
+	if (rebuilt === promptRef.value) return;
+	promptRef.value = rebuilt;
+	// The loader caches the rendered prompt; keep the cache in sync so the
+	// session rebuild below reads the refreshed copy. When Pi's internals no
+	// longer expose that cache, leave the inherited block untouched instead.
+	const cached = loader as unknown as { systemPrompt?: string };
+	cached.systemPrompt = rebuilt;
+	if (loader.getSystemPrompt() !== rebuilt) return;
+	session.setActiveToolsByName(activeNames);
 }
 
 /**
@@ -614,6 +653,7 @@ async function createAndConfigureSession(
 	type: SubagentType,
 	cwd: string,
 	loader: DefaultResourceLoader,
+	promptRef: { value: string },
 	extResult: {
 		extensions: Array<{ path: string; tools: Map<string, unknown> }>;
 	},
@@ -648,6 +688,7 @@ async function createAndConfigureSession(
 		notify,
 	});
 	if (filteredTools) session.setActiveToolsByName(filteredTools);
+	refreshChildToolMetadata(loader, promptRef, session);
 	options.onSessionCreated?.(session);
 	return session;
 }
@@ -815,7 +856,7 @@ async function runAgentImpl(
 		mode,
 		promptExtras,
 	);
-	const { loader, reloadAndMap } = createResourceLoader(
+	const { loader, promptRef, reloadAndMap } = createResourceLoader(
 		config,
 		agentConfig,
 		effectiveCwd,
@@ -829,6 +870,7 @@ async function runAgentImpl(
 		type,
 		effectiveCwd,
 		loader,
+		promptRef,
 		extResult,
 		bufferNotify,
 	);

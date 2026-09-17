@@ -254,7 +254,7 @@ Set model once in config or frontmatter (or pass it explicitly) — the scope gu
 Control how the subagent system prompt is built via `systemPromptMode` (default: `replace`):
 
 - **`replace`** — minimal generic prompt plus the agent's own `<agent_instructions>`. Lowest token cost, most isolated.
-- **`inherit`** — parent's system prompt (scaffolding stripped to avoid duplication) plus `<agent_instructions>`. Best when agents need parent context and guidelines.
+- **`inherit`** — parent's system prompt (scaffolding stripped to avoid duplication) plus `<agent_instructions>`. Best when agents need parent context and guidelines. Pi's tool metadata is rebuilt for the subagent's own tool set, so the inherited `Available tools` and `Guidelines` blocks never advertise tools the subagent does not have (and never hide the ones it does).
 - **`custom`** — content of `~/.pi/agent/subagents-lite-prompt.md` plus `<agent_instructions>`. Full control.
 
 When `includeContextFiles` is `true` (default), AGENTS.md files from the project root and `~/.pi/agent/` load as `<project_context>` before agent-specific instructions — shared static context improves KV cache prefix hit rates. Toggle off to cut token cost.

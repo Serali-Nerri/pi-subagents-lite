@@ -70,9 +70,14 @@ vi.mock("../../src/agents/agent-types.js", async (importOriginal) => {
 	};
 });
 
-vi.mock("../../src/prompt/prompts.js", () => ({
-	buildAgentPrompt: mockModules.mockBuildAgentPrompt,
-}));
+vi.mock("../../src/prompt/prompts.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../../src/prompt/prompts.js")>();
+	return {
+		...actual,
+		buildAgentPrompt: mockModules.mockBuildAgentPrompt,
+	};
+});
 
 vi.mock("../../src/prompt/context.js", () => ({
 	extractText: mockModules.mockExtractText,
@@ -168,6 +173,7 @@ function createMockSession(): any {
 	return {
 		setSessionName: vi.fn(),
 		getActiveToolNames: vi.fn(),
+		getToolDefinition: vi.fn(),
 		setActiveToolsByName: vi.fn(),
 		bindExtensions: vi.fn(),
 		subscribe: vi.fn((listener: (event: any) => void) => {

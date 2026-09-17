@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { buildAgentPrompt } from "../../src/prompt/prompts.ts";
+import { buildAgentPrompt, rebuildToolMetadata } from "../../src/prompt/prompts.ts";
 import type { AgentConfig, EnvInfo } from "../../src/types.ts";
 
 vi.mock("@earendil-works/pi-coding-agent", async () => {
@@ -543,5 +543,85 @@ Current working directory: /tmp`;
 
     expect(result).toContain("Custom.");
     expect(result).not.toContain("<project_context>");
+  });
+});
+
+describe("rebuildToolMetadata — child tool metadata", () => {
+  const parentTools = [
+    { name: "tool_search", snippet: "Activate deferred tools by exact name" },
+    { name: "bash", snippet: "Execute bash commands" },
+    { name: "edit", snippet: "Make precise file edits", guidelines: ["Use edit for precise changes"] },
+    { name: "ls", snippet: "List directory contents" },
+    { name: "read", snippet: "Read file contents", guidelines: ["Use read to examine files instead of cat or sed"] },
+  ];
+  const parentGuides = [
+    "Use edit for precise changes",
+    "Use read to examine files instead of cat or sed",
+  ];
+  const parentPrompt = `You are an expert coding assistant.
+
+Available tools:
+${parentTools.map((t) => `- ${t.name}: ${t.snippet}`).join("\n")}
+
+In addition to the tools above, you may have access to other custom tools depending on the project.
+
+Guidelines:
+${parentGuides.map((g) => `- ${g}`).join("\n")}
+
+Pi documentation (read only when the user asks about pi itself):
+- Main documentation: /docs/README.md
+
+Current working directory: /parent`;
+
+  it("replaces the inherited blocks with the child's own tools and guidelines", () => {
+    const rebuilt = rebuildToolMetadata(parentPrompt, [
+      { name: "bash", snippet: "Execute bash commands", guidelines: ["Use bash for commands"] },
+      { name: "read", snippet: "Read file contents", guidelines: ["Use read to examine files instead of cat or sed"] },
+    ]);
+
+    expect(rebuilt).toContain("- bash: Execute bash commands");
+    expect(rebuilt).toContain("- read: Read file contents");
+    expect(rebuilt).not.toContain("- tool_search");
+    expect(rebuilt).not.toContain("- edit:");
+    expect(rebuilt).not.toContain("- ls:");
+    expect(rebuilt).toContain("- Use bash for commands");
+    expect(rebuilt).not.toContain("Use edit for precise changes");
+    expect(rebuilt).toContain("- Be concise in your responses");
+    expect(rebuilt).toContain("- Show file paths clearly when working with files");
+    // Unrelated text is preserved.
+    expect(rebuilt).toContain("In addition to the tools above, you may have access to other custom tools");
+    expect(rebuilt).toContain("Pi documentation (read only");
+    expect(rebuilt).toContain("Current working directory: /parent");
+  });
+
+  it("omits tools without a snippet and falls back to (none)", () => {
+    const rebuilt = rebuildToolMetadata(parentPrompt, [{ name: "silent" }]);
+    expect(rebuilt).toContain("Available tools:\n(none)\n");
+    expect(rebuilt).not.toContain("- silent");
+  });
+
+  it("adds Pi's file exploration guideline only without grep/find/ls tools", () => {
+    const withBash = rebuildToolMetadata(parentPrompt, [{ name: "bash", snippet: "Execute bash commands" }]);
+    expect(withBash).toContain("Use bash for file operations like ls, rg, find");
+
+    const withGrep = rebuildToolMetadata(parentPrompt, [
+      { name: "bash", snippet: "Execute bash commands" },
+      { name: "grep", snippet: "Grep contents" },
+    ]);
+    expect(withGrep).not.toContain("Use bash for file operations");
+  });
+
+  it("keeps the prompt unchanged when the metadata block is missing or ambiguous", () => {
+    expect(rebuildToolMetadata("Custom role only", [{ name: "bash", snippet: "Execute bash commands" }]))
+      .toBe("Custom role only");
+    const duplicated = `${parentPrompt}\n\nAvailable tools:\nexample`;
+    expect(rebuildToolMetadata(duplicated, [{ name: "bash", snippet: "Execute bash commands" }])).toBe(duplicated);
+  });
+
+  it("rebuilds a prompt produced by inherit mode", () => {
+    const inherited = buildAgentPrompt(baseConfig, "/test/cwd", env, { parentSystemPrompt: parentPrompt }, "inherit");
+    const rebuilt = rebuildToolMetadata(inherited, [{ name: "read", snippet: "Read file contents" }]);
+    expect(rebuilt).toContain("Available tools:\n- read: Read file contents\n");
+    expect(rebuilt).not.toContain("- edit:");
   });
 });
