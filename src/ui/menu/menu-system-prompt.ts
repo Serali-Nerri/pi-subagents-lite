@@ -13,16 +13,29 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildSettingsListTheme } from "./helpers.js";
+import { buildSettingsListTheme, type MenuTheme } from "./helpers.js";
+import { createExcludedExtensionsSubmenu } from "./submenus/excluded-extensions.js";
+import { listInstalledExtensions } from "../../agents/agent-runner.js";
 import { SettingsListWrapper } from "./wrappers/settings-list.js";
 import type { SystemPromptMode } from "../../agents/types.js";
 import { getStore } from "../../shell.js";
 import { CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
 
+/** Placeholder theme for the pre-render build; replaced when the menu opens. */
+const FALLBACK_THEME: MenuTheme = { fg: (_color, text) => text, bold: (text) => text };
+
+/** Item value: how many extensions are blacklisted, or "none". */
+function blacklistLabel(excluded: readonly string[], detected: number): string {
+  if (excluded.length === 0) return detected > 0 ? "none" : "none (no extensions detected)";
+  return `${excluded.length} excluded`;
+}
+
 export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
+  // Discovery reloads a throwaway resource loader, so it runs once per menu open.
+  const installed = await listInstalledExtensions();
 
-  const buildItems = (): SettingItem[] => {
+  const buildItems = (theme: MenuTheme): SettingItem[] => {
     const items: SettingItem[] = [
       {
         id: "systemPromptMode",
@@ -66,11 +79,18 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
         values: ["ON", "OFF"],
         description: "Give new agents all extensions when frontmatter omits the field.",
       },
+      {
+        id: "excludedExtensions",
+        label: "Global extension blacklist",
+        currentValue: blacklistLabel(store.agent.excludedExtensions ?? [], installed.length),
+        submenu: createExcludedExtensionsSubmenu(installed, theme),
+        description: "Extensions never loaded in subagent sessions. Enter opens the list; Enter/space toggles each entry.",
+      },
     );
 
     return items;
   };
-  let items = buildItems();
+  let items = buildItems(FALLBACK_THEME);
   let rebuild: ((newItems: SettingItem[]) => void) | null = null;
 
   const onChange = (id: string, newValue: string) => {
@@ -79,7 +99,7 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
         store.mutate.agent.setSystemPromptMode(newValue as SystemPromptMode);
         ctx.ui.notify(`System prompt mode set to ${newValue}`, "info");
         // Rebuild: "custom" adds the create prompt file item, other modes remove it.
-        items = buildItems();
+        items = buildItems(FALLBACK_THEME);
         rebuild?.(items);
         break;
       case "createPromptFile":
@@ -107,6 +127,8 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
   };
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
+    // Rebuild with the real theme so the blacklist submenu matches the menu.
+    items = buildItems(theme);
     const settingsList = new SettingsList(items, 10, buildSettingsListTheme(theme), onChange, () => done(undefined));
     return new SettingsListWrapper(settingsList, { title: "System Prompt", theme, onCancel: () => done(undefined), onRebuild: (r) => { rebuild = r; } });
   });

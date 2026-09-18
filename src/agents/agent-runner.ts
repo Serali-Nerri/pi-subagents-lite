@@ -39,7 +39,7 @@ import {
 	SHORT_ID_LENGTH,
 } from "../types.js";
 import type { SubagentType, SystemPromptMode } from "./types.js";
-import { getStore, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
+import { getStore, getSessionCtx, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
 import {
 	DEFAULT_GRACE_TURNS,
 	CUSTOM_PROMPT_PATH,
@@ -236,7 +236,7 @@ export function subscribeToSessionEvents(
  * Does NOT depend on internal directory structure (dist/, lib/, src/, etc).
  * Only cares about the package root, which is determined by distribution method.
  */
-function extractExtensionName(extPath: string): string {
+export function extractExtensionName(extPath: string): string {
 	const parts = extPath.split(path.sep);
 
 	// 1. Git package: .../git/github.com/<user>/<pkg>/...
@@ -438,32 +438,86 @@ function buildExtToolMap(
 	return map;
 }
 
-/** Build extension override for whitelist or blacklist filtering. */
-function buildExtOverride(
+/** One extension the current installation loads. */
+export interface InstalledExtension {
+	/** Name used by `extensions`, `exclude_extensions`, and the global blacklist. */
+	name: string;
+	/** Entry file path, for display. */
+	path: string;
+}
+
+/**
+ * List the extensions this installation loads.
+ *
+ * A throwaway resource loader is reloaded with the session's settings, so the
+ * names match what child sessions resolve; nothing is bound to a session, so
+ * extension factories stay side-effect free.
+ */
+export async function listInstalledExtensions(limit = 200): Promise<InstalledExtension[]> {
+	const cwd = (() => { try { return getSessionCtx().cwd; } catch { return process.cwd(); } })();
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir: getAgentDir(),
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	});
+	let entries: Array<{ path: string }> = [];
+	try {
+		await loader.reload();
+		entries = loader.getExtensions()?.extensions ?? [];
+	} catch {
+		return [];
+	}
+	const seen = new Map<string, InstalledExtension>();
+	for (const ext of entries) {
+		const name = extractExtensionName(ext.path);
+		if (!name || seen.has(name)) continue;
+		seen.set(name, { name, path: ext.path });
+	}
+	return [...seen.values()]
+		.sort((left, right) => left.name.localeCompare(right.name))
+		.slice(0, limit);
+}
+
+/** Split "ext/tool" entries down to the extension name. */
+function extensionEntryName(entry: string): string {
+	const slashIdx = entry.indexOf("/");
+	return slashIdx !== -1 ? entry.slice(0, slashIdx) : entry;
+}
+
+/**
+ * Build extension override for whitelist or blacklist filtering.
+ *
+ * The global blacklist (`excludedExtensions`) always wins: it is subtracted
+ * after the whitelist and merged with the agent's own `exclude_extensions`.
+ */
+export function buildExtOverride(
 	extensions: true | string[] | false | undefined,
-	excludeExtensions?: string[],
+	excludeExtensions: readonly string[] | undefined,
+	globalExcluded: readonly string[] = [],
 ) {
+	const excludedNames = new Set(
+		[...(excludeExtensions ?? []), ...globalExcluded]
+			.map(extensionEntryName)
+			.filter((name) => name.length > 0),
+	);
 	if (Array.isArray(extensions)) {
-		const allowedNames = new Set(
-			extensions.map((ext) => {
-				const slashIdx = ext.indexOf("/");
-				return slashIdx !== -1 ? ext.slice(0, slashIdx) : ext;
-			}),
-		);
+		const allowedNames = new Set(extensions.map(extensionEntryName));
 		return (result: any) => ({
 			...result,
-			extensions: result.extensions.filter((ext: { path: string }) =>
-				allowedNames.has(extractExtensionName(ext.path)),
-			),
+			extensions: result.extensions.filter((ext: { path: string }) => {
+				const name = extractExtensionName(ext.path);
+				return allowedNames.has(name) && !excludedNames.has(name);
+			}),
 		});
 	}
-	if (excludeExtensions) {
-		const excludeSet = new Set(excludeExtensions);
+	if (excludedNames.size > 0) {
 		return (result: any) => ({
 			...result,
 			extensions: result.extensions.filter(
-				(ext: { path: string }) =>
-					!excludeSet.has(extractExtensionName(ext.path)),
+				(ext: { path: string }) => !excludedNames.has(extractExtensionName(ext.path)),
 			),
 		});
 	}
@@ -503,6 +557,7 @@ function createResourceLoader(
 		extensionsOverride: buildExtOverride(
 			extensions,
 			agentConfig?.excludeExtensions,
+			getStore().agent.excludedExtensions,
 		),
 	};
 	const loader = new DefaultResourceLoader(loaderOpts);
@@ -835,6 +890,23 @@ async function runAgentImpl(
 		bufferNotify(
 			`agent "${type}": both extensions and exclude_extensions set — extensions (whitelist) wins`,
 		);
+	}
+	{
+		const globalExcluded = new Set(store.agent.excludedExtensions.map(extensionEntryName));
+		if (globalExcluded.size > 0) {
+			const blocked = new Set<string>();
+			for (const entry of Array.isArray(agentConfig?.extensions) ? agentConfig.extensions : []) {
+				if (globalExcluded.has(extensionEntryName(entry))) blocked.add(extensionEntryName(entry));
+			}
+			for (const entry of agentConfig?.excludeExtensions ?? []) {
+				if (globalExcluded.has(extensionEntryName(entry))) blocked.add(extensionEntryName(entry));
+			}
+			if (blocked.size > 0) {
+				bufferNotify(
+					`agent "${type}": ${[...blocked].join(", ")} blocked by the global extension blacklist — not loaded`,
+				);
+			}
+		}
 	}
 
 	const effectiveCwd = options.cwd ?? ctx.cwd;

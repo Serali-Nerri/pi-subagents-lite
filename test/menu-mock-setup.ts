@@ -118,6 +118,8 @@ vi.mock("../src/shell.js", () => {
         defaultMaxTurns: a.defaultMaxTurns,
         loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
         loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
+        showAgentSelector: a.showAgentSelector === true,
+        excludedExtensions: Array.isArray(a.excludedExtensions) ? a.excludedExtensions : [],
         showTools: a.showTools !== false,
         showTurns: a.showTurns !== false,
         showInput: a.showInput !== false,
@@ -166,7 +168,7 @@ vi.mock("../src/shell.js", () => {
         clearModelOverride(type: string) { delete mockModules.mockConfig.agent[type]; },
         clearAllModelOverrides() {
           const preserved: Record<string, unknown> = {};
-          for (const key of ['default', 'forceBackground', 'graceTurns', 'showCost', 'showTools', 'showTurns', 'showInput', 'showOutput', 'showContext', 'showTime', 'deltaInputTokens', 'widgetMaxLines', 'widgetMaxLinesCompact', 'widgetDescLengthFull', 'widgetDescLengthCompact', 'widgetCompact', 'widgetShortcut', 'systemPromptMode', 'includeContextFiles', 'defaultThinking', 'defaultMaxTurns', 'loadSkillsImplicitly', 'loadExtensionsImplicitly']) {
+          for (const key of ['default', 'forceBackground', 'graceTurns', 'showCost', 'showTools', 'showTurns', 'showInput', 'showOutput', 'showContext', 'showTime', 'deltaInputTokens', 'widgetMaxLines', 'widgetMaxLinesCompact', 'widgetDescLengthFull', 'widgetDescLengthCompact', 'widgetCompact', 'widgetShortcut', 'systemPromptMode', 'includeContextFiles', 'defaultThinking', 'defaultMaxTurns', 'loadSkillsImplicitly', 'loadExtensionsImplicitly', 'showAgentSelector', 'excludedExtensions']) {
             const val = mockModules.mockConfig.agent[key];
             if (val != null || key === 'default' || key === 'forceBackground') {
               preserved[key] = val;
@@ -183,6 +185,8 @@ vi.mock("../src/shell.js", () => {
         setDefaultMaxTurns(n: number | undefined) { mockModules.mockConfig.agent.defaultMaxTurns = n; },
         setLoadSkillsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadSkillsImplicitly = value; },
         setLoadExtensionsImplicitly(value: boolean) { mockModules.mockConfig.agent.loadExtensionsImplicitly = value; },
+        setShowAgentSelector(value: boolean) { mockModules.mockConfig.agent.showAgentSelector = value; },
+        setExcludedExtensions(names: string[]) { mockModules.mockConfig.agent.excludedExtensions = names; },
         setShowTools(enabled: boolean) { mockModules.mockConfig.agent.showTools = enabled; },
         setShowTurns(enabled: boolean) { mockModules.mockConfig.agent.showTurns = enabled; },
         setShowInput(enabled: boolean) { mockModules.mockConfig.agent.showInput = enabled; },

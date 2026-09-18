@@ -750,3 +750,24 @@ describe("agent selector visibility", () => {
 		expect(current().agent.showAgentSelector).toBe(true);
 	});
 });
+
+describe("global extension blacklist", () => {
+	it("defaults to an empty list and filters blank entries", () => {
+		expect(new ConfigStore(memIO().io).agent.excludedExtensions).toEqual([]);
+
+		const config = defaultConfig();
+		config.agent.excludedExtensions = ["pi-btw", "", "   ", "pi-btw", "rtk"] as string[];
+		expect(new ConfigStore({ load: () => config, save: () => {} }).agent.excludedExtensions).toEqual(["pi-btw", "rtk"]);
+	});
+
+	it("persists deduplicated names and drops blanks", () => {
+		const { io, current } = memIO();
+		const store = new ConfigStore(io);
+		store.mutate.agent.setExcludedExtensions(["pi-btw", "pi-btw", "  ", "pi-session-ui"]);
+		expect(store.agent.excludedExtensions).toEqual(["pi-btw", "pi-session-ui"]);
+		expect(current().agent.excludedExtensions).toEqual(["pi-btw", "pi-session-ui"]);
+
+		store.mutate.agent.setExcludedExtensions([]);
+		expect(current().agent.excludedExtensions).toEqual([]);
+	});
+});

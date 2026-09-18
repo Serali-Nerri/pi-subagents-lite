@@ -49,6 +49,8 @@ export interface ResolvedAgentSettings {
   readonly widgetShortcut: boolean;
   /** Whether the agent selector below the editor is shown (default false). */
   readonly showAgentSelector: boolean;
+  /** Extensions never loaded in subagent sessions (global blacklist). */
+  readonly excludedExtensions: string[];
   readonly widgetDescLengthFull: number;
   readonly widgetDescLengthCompact: number;
   /** System prompt mode: replace (default), inherit parent, or custom file. */
@@ -126,6 +128,11 @@ export class ConfigStore {
       widgetCompact: a.widgetCompact === true,
       widgetShortcut: a.widgetShortcut === true,
       showAgentSelector: a.showAgentSelector === true,
+      excludedExtensions: Array.isArray(a.excludedExtensions)
+        ? [...new Set(a.excludedExtensions.filter(
+            (name): name is string => typeof name === "string" && name.trim().length > 0,
+          ))]
+        : [],
       widgetDescLengthFull: a.widgetDescLengthFull ?? 50,
       widgetDescLengthCompact: a.widgetDescLengthCompact ?? 30,
       systemPromptMode: VALID_SYSTEM_PROMPT_MODES.has(a.systemPromptMode as string) ? (a.systemPromptMode as SystemPromptMode) : "replace",
@@ -286,6 +293,12 @@ export class ConfigStore {
         this.config.agent.showAgentSelector = enabled;
         this.persist();
         this.navigator?.setVisible(enabled);
+      },
+      /** Replace the global extension blacklist. Order is preserved, duplicates dropped. */
+      setExcludedExtensions: (names: string[]): void => {
+        const unique = [...new Set(names.filter((name) => typeof name === "string" && name.trim().length > 0))];
+        this.config.agent.excludedExtensions = unique;
+        this.persist();
       },
     },
     widget: {

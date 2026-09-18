@@ -40,6 +40,8 @@ export interface SubagentsConfig {
     loadSkillsImplicitly?: boolean;
     /** Global default for extensions loading when agent doesn't explicitly set extensions. true (default) or false. */
     loadExtensionsImplicitly?: boolean;
+    /** Extensions never loaded in subagent sessions, regardless of whitelist or implicit loading. */
+    excludedExtensions?: string[];
     /** When true, skip built-in default agents (general-purpose, Explore) at registration. */
     disableDefaultAgents?: boolean;
     /** Whether to show toolUses count in widget stats line. Default: true. */
@@ -60,7 +62,7 @@ export interface SubagentsConfig {
     widgetDescLengthCompact?: number;
     /** When > 0, thinking deltas stream to output file during message_update events. Default: 0 (disabled). */
     outputThinkingBufferSize?: number;
-    [agentType: string]: string | null | undefined | boolean | number;
+    [agentType: string]: string | string[] | null | undefined | boolean | number;
   };
   concurrency: {
     default: number;

@@ -45,6 +45,7 @@ const mockModules = vi.hoisted(() => ({
 	mockLoadProjectContextFiles: vi.fn().mockReturnValue([]),
 	mockIncludeContextFiles: true as boolean,
 	mockSystemPromptMode: "replace" as string,
+	mockExcludedExtensions: [] as string[],
 	getLoaderOpts: () => _loaderOpts[_loaderOpts.length - 1] ?? null,
 	clearLoaderOpts: () => {
 		_loaderOpts.length = 0;
@@ -97,8 +98,12 @@ vi.mock("../../src/shell.js", () => ({
 			forceBackground: false,
 			showCost: false,
 			defaultModel: null,
+			loadSkillsImplicitly: false,
+			loadExtensionsImplicitly: false,
+			excludedExtensions: mockModules.mockExcludedExtensions,
 		},
 	}),
+	getSessionCtx: () => ({ cwd: "/home/test/project" }),
 	enterSubagentSpawn: mockModules.mockEnterSubagentSpawn,
 	exitSubagentSpawn: mockModules.mockExitSubagentSpawn,
 }));
@@ -122,6 +127,7 @@ vi.mock("../../src/models/model-scope.js", () => ({
 // --- Import the module under test ---
 
 import {
+	buildExtOverride,
 	continueAgentSession,
 	runAgent,
 	subscribeToSessionEvents,
@@ -2380,5 +2386,39 @@ describe("runAgent — notify buffering", () => {
 		expect(warnSpy).toHaveBeenCalledWith(
 			expect.stringContaining("both tools and exclude_tools set"),
 		);
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/*  Global extension blacklist                                         */
+/* ------------------------------------------------------------------ */
+
+describe("buildExtOverride — global extension blacklist", () => {
+	const entries = [
+		{ path: "/home/u/.pi/agent/extensions/pi-session-ui/index.ts" },
+		{ path: "/home/u/.pi/agent/extensions/pi-tool-search/index.ts" },
+		{ path: "/home/u/.pi/agent/npm/node_modules/pi-web-access/index.ts" },
+	];
+	const names = (result: any): string[] =>
+		result.extensions.map((e: any) => e.path.split("/").slice(-2)[0]);
+
+	it("subtracts globally excluded names from a whitelist", () => {
+		const override = buildExtOverride(["pi-tool-search", "pi-web-access"], undefined, ["pi-web-access"])!;
+		expect(names(override({ extensions: entries }))).toEqual(["pi-tool-search"]);
+	});
+
+	it("merges the agent blacklist with the global blacklist", () => {
+		const override = buildExtOverride(true, ["pi-session-ui"], ["pi-web-access"])!;
+		expect(names(override({ extensions: entries }))).toEqual(["pi-tool-search"]);
+	});
+
+	it("returns undefined when nothing is filtered", () => {
+		expect(buildExtOverride(true, undefined, [])).toBeUndefined();
+		expect(buildExtOverride(undefined, [], [])).toBeUndefined();
+	});
+
+	it("accepts ext/tool style entries in the blacklist", () => {
+		const override = buildExtOverride(undefined, undefined, ["pi-web-access/search"])!;
+		expect(names(override({ extensions: entries }))).toEqual(["pi-session-ui", "pi-tool-search"]);
 	});
 });

@@ -171,7 +171,8 @@ A minimal agent — just `name` and `description` — gets everything: all tools
 | `tools` | `true` \| `string[]` \| `false` | `true` | **Tool whitelist** — which tool schemas the LLM sees. Accepts built-in names and extension tool references (see below). Mutually exclusive with `exclude_tools`. |
 | `exclude_tools` | `string[]` | none | **Tool blacklist** — all tools except these are visible. Supports `ext/*` syntax. Mutually exclusive with `tools` (when `tools` is `string[]`). |
 | `extensions` | `true` \| `string[]` \| `false` | `true` | **Extension loader** — which extensions load (hooks + commands fire). Does NOT control tool visibility. Mutually exclusive with `exclude_extensions`. |
-| `exclude_extensions` | `string[]` | none | **Extension blacklist** — all extensions except these load. Mutually exclusive with `extensions` (when `extensions` is `string[]`). |
+| `exclude_extensions` | `string[]` | none | **Per-agent extension blacklist** — all extensions except these load. Mutually exclusive with `extensions` (when `extensions` is `string[]`). |
+| `excludedExtensions` | `string[]` | `[]` | **Global extension blacklist** — these extensions never load in any subagent session. Subtracted *after* an agent's `extensions` whitelist and merged with its `exclude_extensions`, so it wins over both. Edited from `/agents` → Settings → System prompt, or directly in the config file. |
 | `skills` | `true` \| `string[]` \| `false` | `true` | **Skill whitelist** — which skills are available (metadata in system prompt). |
 | `preload_skills` | `string[]` \| `false` | `false` | **Full skill injection** — dump complete SKILL.md content into the system prompt instead of metadata-only. |
 | `model` | string | inherit parent | Default model as `"provider/model-id"`. See [Model Resolution](#model-resolution). |
@@ -228,6 +229,8 @@ exclude_tools: [edit, write]
 
 **Implicit loading.** `loadSkillsImplicitly` and `loadExtensionsImplicitly` are config globals that decide what an agent gets when its frontmatter **omits** `skills` / `extensions`. They default ON, so an agent that says nothing about either gets everything. Turn them OFF (in config, or `/agents` → System prompt) to default every new agent to nothing — isolated sessions and minimal token cost, with agents opting in explicitly via `skills: [debug]` / `extensions: [tavily]`. A concrete frontmatter value always overrides the global.
 
+**Global extension blacklist.** `excludedExtensions` removes extensions from *every* subagent session, whatever else is configured: it is subtracted after an agent's `extensions` whitelist and merged with its `exclude_extensions`. Use it for extensions that are irrelevant to subagents (UI, dictation, clipboard helpers) while keeping implicit loading ON. Names are the same ones used in frontmatter — an extension directory under `~/.pi/agent/extensions/<name>/`, an npm package, a git package, or a local package resolved to its package name. The list is edited in `/agents` → Settings → System prompt → **Global extension blacklist**, where every detected extension is shown and Enter/space toggles it.
+
 **Token cost ranking** (highest → lowest): `preload_skills` ≫ `tools`/`exclude_tools` (each tool schema every turn) > `extensions` (hooks fire every turn) > `skills` (metadata-only, agent reads full content on-demand) > `skills: false` (zero). Prefer metadata skills over preloading; whitelist tools aggressively for narrow agents.
 
 ## Model Resolution
@@ -269,7 +272,7 @@ Management menu with three sections:
 - **Settings**
   - **Model settings** — global default, per-type overrides, session overrides, clear all
   - **Spawn options** — force background, grace turns, default max turns, default thinking, disable default agents
-  - **System prompt** — mode, custom prompt file, include AGENTS.md, load skills/extensions implicitly
+  - **System prompt** — mode, custom prompt file, include AGENTS.md, load skills/extensions implicitly, global extension blacklist (Enter opens the list, Enter/space toggles each detected extension)
   - **Concurrency** — default limit, per-provider and per-model slots (with search), reset to defaults
   - **Widget settings** — show agent selector, force compact, max lines, description length, thinking buffer size, ctrl+o shortcut, usage stats (toggle tools, turns, input/output tokens, context %, cost, time)
 - **Debug** — agent types, generated briefing, and runtime diagnostics
@@ -352,6 +355,7 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
     "includeContextFiles": true,
     "loadSkillsImplicitly": false,
     "loadExtensionsImplicitly": false,
+    "excludedExtensions": ["pi-session-ui", "pi-transcribe"],
     "disableDefaultAgents": false,
     "Explore": "xiaomi/mimo-v2.5",
     "builder": "xiaomi/mimo-v2-pro",

@@ -29,6 +29,9 @@ export function buildModelOptions(rawOptions: string[]): SelectOption[] {
  * Build a SettingsListTheme from a pi-coding-agent Theme.
  * Shared by widget settings and future SettingsList-based menus.
  */
+/** Minimal theme surface the menu components need. */
+export type MenuTheme = { fg(color: string, text: string): string; bold(text: string): string };
+
 export function buildSettingsListTheme(theme: { fg(color: string, text: string): string; bold(text: string): string }): SettingsListTheme {
   return {
     label: (text, selected) => selected ? theme.fg("accent", text) : text,

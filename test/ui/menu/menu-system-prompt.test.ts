@@ -279,3 +279,28 @@ describe("showSystemPromptMenu — item order", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("showSystemPromptMenu — global extension blacklist", () => {
+  beforeEach(() => {
+    mockModules.mockConfig.agent = { default: null, forceBackground: false };
+    vi.clearAllMocks();
+    settingsListCalls = [];
+  });
+
+  it("lists the blacklist item with the excluded count", async () => {
+    mockModules.mockConfig.agent.excludedExtensions = ["pi-btw", "rtk"];
+    const ctx = createMockCtx();
+    await showSystemPromptMenu(ctx);
+    const item = settingsListCalls[0].items.find((i: any) => i.id === "excludedExtensions");
+    expect(item).toBeDefined();
+    expect(item.currentValue).toBe("2 excluded");
+    expect(typeof item.submenu).toBe("function");
+  });
+
+  it("reports an empty blacklist as none", async () => {
+    const ctx = createMockCtx();
+    await showSystemPromptMenu(ctx);
+    const item = settingsListCalls[0].items.find((i: any) => i.id === "excludedExtensions");
+    expect(item.currentValue).toBe("none");
+  });
+});
