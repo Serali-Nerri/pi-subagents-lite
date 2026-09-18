@@ -75,17 +75,18 @@ async function handleAgentBriefing(ctx: ExtensionCommandContext): Promise<void> 
     lines.push("");
   }
 
-  // Parameter descriptions
+  // Parameter descriptions — model/thinking/max_turns/max_tokens are NOT LLM params.
+  // They are injected from frontmatter/config via tool_call listener; see Model Resolution.
   lines.push("## Agent Tool Parameters\n");
   lines.push("| Parameter | Description |");
   lines.push("|-----------|-------------|");
   lines.push("| `prompt` | The task for the agent (required) |");
   lines.push("| `description` | One-line summary of what the agent should do (required) |");
   lines.push("| `agent` | Which agent type to use (default: general-purpose) |");
-  lines.push("| `model` | Optional model override. Forms: bare id (`grok-4.5`), `provider/id` (`cpa-responses/grok-4.5`), or with thinking shorthand (`grok-4.5:low`). Bare id must exactly match an available model id. Default: configured override or parent model. |");
-  lines.push("| `thinking` | Optional thinking mode override (e.g., `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Also accepted via `model` as `id:thinking`. |");
   lines.push("| `run_in_background` | When `true`, result is auto-delivered — do NOT poll, sleep, or timeout-wait. Parent task advances automatically on completion. |");
   lines.push("| `worktree_path` | Optional path to a git worktree of the parent's repo. See below for details. |");
+  lines.push("");
+  lines.push("Model, thinking, max turns/tokens are configured per agent type (frontmatter) or via /agents menu — do NOT pass them.");
   lines.push("");
 
   // Usage guidelines

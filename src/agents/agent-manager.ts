@@ -23,12 +23,13 @@ import {
 import type { SubagentType } from "./types.js";
 import { addUsage, getLifetimeTotal, getSessionContextPercent, type AgentUsage } from "./usage.js";
 import { errorMessage } from "../utils.js";
+import { Watchdog, watchdogReason } from "./watchdog.js";
 
 /** How often to check for expired agent records (milliseconds). */
 const CLEANUP_INTERVAL_MS = 60_000;
 
-/** Age after which a completed agent record is evicted (milliseconds). */
-const CLEANUP_AGE_CUTOFF_MS = 10 * 60_000;
+/** How often to run watchdog stuck-agent checks (milliseconds). */
+const WATCHDOG_INTERVAL_MS = 30_000;
 
 /** UUID prefix length for agent IDs stored in the agents map (uniqueness). */
 const AGENT_ID_PREFIX_LENGTH = 17;
@@ -102,6 +103,10 @@ export class AgentManager {
   /** Queue of agents waiting to start, keyed by modelKey. */
   private queue: { id: string; modelKey: string; args: SpawnArgs }[] = [];
 
+  /** Stuck-agent detection (tool/idle timeouts). Fed by record callbacks. */
+  private watchdog = new Watchdog();
+  private watchdogInterval: ReturnType<typeof setInterval>;
+
   constructor(
     onComplete?: OnAgentComplete,
     concurrency?: ConcurrencyConfig,
@@ -124,6 +129,8 @@ export class AgentManager {
 
     this.cleanupInterval = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
     this.cleanupInterval.unref();
+    this.watchdogInterval = setInterval(() => this.checkWatchdog(), WATCHDOG_INTERVAL_MS);
+    this.watchdogInterval.unref();
   }
 
   /**
@@ -275,11 +282,17 @@ export class AgentManager {
     record.display.outputFile = record.execution.outputLog.path;
 
     this.onStart?.(record);
+    try { this.watchdog.start(id); } catch { /* ignore */ }
 
     // Wire parent abort signal to stop the subagent when the parent is interrupted
     if (options.signal) {
       options.signal.addEventListener("abort", () => this.abort(id, "agent"), { once: true });
     }
+
+    const trackedTextDelta = (delta: string, fullText: string) => {
+      try { this.watchdog.recordText(id); } catch { /* ignore */ }
+      options.onTextDelta?.(delta, fullText);
+    };
 
     const promise = runAgent(ctx, type, prompt, {
       pi,
@@ -294,9 +307,10 @@ export class AgentManager {
       ...this.createRecordCallbacks(record, options),
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = turnCount;
+        try { this.watchdog.recordText(id); } catch { /* ignore */ }
         options.onTurnEnd?.(turnCount);
       },
-      onTextDelta: options.onTextDelta,
+      onTextDelta: trackedTextDelta,
       onSessionCreated: (session) => {
         record.execution.session = session;
         // Snapshot effective model/thinking for widget display (session may inherit settings defaults).
@@ -357,6 +371,7 @@ export class AgentManager {
         // Decrement per-model concurrency count
         if (concurrencySlot) concurrencySlot.running--;
 
+        try { this.watchdog.stop(record.id); } catch { /* ignore */ }
         record.execution.settled = true;
         this.safeNotifyComplete(record);
         this.drainQueue();
@@ -413,6 +428,7 @@ export class AgentManager {
     return {
       onToolActivity: (activity) => {
         if (activity.type === "end") record.stats.toolUses++;
+        try { this.watchdog.recordActivity(record.id, activity); } catch { /* ignore */ }
         options?.onToolActivity?.(activity);
       },
       onAssistantUsage: (usage) => {
@@ -431,6 +447,7 @@ export class AgentManager {
       },
       onCompaction: (info) => {
         record.stats.compactionCount++;
+        try { this.watchdog.recordText(record.id); } catch { /* ignore */ }
         options?.onCompaction?.(info);
       },
     };
@@ -529,6 +546,7 @@ export class AgentManager {
     record.lifecycle.resultConsumed = undefined;
     record.error = undefined;
     try { record.execution.outputLog?.resume(session); } catch { /* best effort */ }
+    try { this.watchdog.start(id); } catch { /* ignore */ }
 
     const trackedCallbacks = this.createRecordCallbacks(record, callbacks);
     const promise = continueAgentSession(session, message, {
@@ -536,9 +554,13 @@ export class AgentManager {
       images,
       maxTurns: record.stats.maxTurns,
       graceTurns: record.execution.graceTurns,
-      onTextDelta: callbacks.onTextDelta,
+      onTextDelta: (delta, fullText) => {
+        try { this.watchdog.recordText(id); } catch { /* ignore */ }
+        callbacks.onTextDelta?.(delta, fullText);
+      },
       onTurnEnd: (turnCount) => {
         record.stats.turnCount = previousTurns + turnCount;
+        try { this.watchdog.recordText(id); } catch { /* ignore */ }
         callbacks.onTurnEnd?.(turnCount);
       },
     })
@@ -576,6 +598,7 @@ export class AgentManager {
           });
         } catch { /* best effort */ }
         if (concurrencySlot) concurrencySlot.running--;
+        try { this.watchdog.stop(record.id); } catch { /* ignore */ }
         record.execution.settled = true;
         this.safeNotifyComplete(record);
         this.drainQueue();
@@ -614,6 +637,7 @@ export class AgentManager {
     } else {
       record.execution.abortController?.abort();
     }
+    try { this.watchdog.stop(record.id); } catch { /* ignore */ }
     record.lifecycle.status = "stopped";
     record.lifecycle.stoppedBy = stoppedBy;
     record.lifecycle.completedAt = Date.now();
@@ -622,6 +646,7 @@ export class AgentManager {
 
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
+    try { this.watchdog.stop(id); } catch { /* ignore */ }
     record.execution.session?.dispose();
     record.execution.session = undefined;
     this.agents.delete(id);
@@ -629,8 +654,42 @@ export class AgentManager {
     try { this.onRemove?.(record); } catch { /* ignore */ }
   }
 
+  /** Periodic stuck-agent check: abort agents past tool/idle timeouts. */
+  private checkWatchdog(): void {
+    let toolTimeoutMin = 45;
+    let idleTimeoutMin = 45;
+    try {
+      const a = getStore().agent;
+      toolTimeoutMin = a.toolTimeoutMinutes;
+      idleTimeoutMin = a.idleTimeoutMinutes;
+    } catch { /* store unavailable in tests */ }
+    if ((toolTimeoutMin ?? 0) <= 0 && (idleTimeoutMin ?? 0) <= 0) return;
+    let decisions: Map<string, { kind: "tool" | "idle"; toolName?: string; elapsedMs: number }>;
+    try {
+      decisions = this.watchdog.check(
+        (toolTimeoutMin ?? 0) * 60_000,
+        (idleTimeoutMin ?? 0) * 60_000,
+        (id) => this.agents.get(id)?.lifecycle.status === "running",
+      );
+    } catch { return; }
+    for (const [id, detail] of decisions) {
+      const record = this.agents.get(id);
+      if (!record || record.lifecycle.status !== "running") continue;
+      record.error = watchdogReason(detail);
+      try { record.execution.abortController?.abort(); } catch { /* ignore */ }
+      try { record.execution.session?.abort(); } catch { /* ignore */ }
+      record.lifecycle.status = "stopped";
+      record.lifecycle.completedAt = Date.now();
+      record.lifecycle.resultConsumed = true;
+      this.watchdog.stop(id);
+      this.safeNotifyComplete(record);
+    }
+  }
+
   private cleanup() {
-    const cutoff = Date.now() - CLEANUP_AGE_CUTOFF_MS;
+    let retentionMin = 10;
+    try { retentionMin = getStore().agent.finishedRetentionMinutes ?? 10; } catch { /* ignore */ }
+    const cutoff = Date.now() - Math.max(1 / 60, retentionMin) * 60_000;
     for (const [id, record] of this.agents) {
       if (!isTerminalStatus(record.lifecycle.status)) continue;
       if ((record.lifecycle.completedAt ?? 0) >= cutoff) continue;
@@ -644,6 +703,7 @@ export class AgentManager {
 
   dispose() {
     clearInterval(this.cleanupInterval);
+    try { clearInterval(this.watchdogInterval); } catch { /* ignore */ }
     this.queue = [];
     for (const record of this.agents.values()) {
       record.execution.session?.dispose();

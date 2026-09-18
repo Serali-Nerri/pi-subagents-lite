@@ -24,6 +24,7 @@ export interface AgentConfigFromMd {
   name?: string;
   display_name?: string;
   description?: string;
+  color?: string;
   tools?: string[];
   exclude_tools?: string[];
   extensions?: boolean | string[];
@@ -36,7 +37,7 @@ export interface AgentConfigFromMd {
   max_tokens?: number;
   hidden?: boolean;
   systemPrompt: string;
-  source: "user" | "project";
+  source: "user" | "project" | "shared";
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,7 +258,7 @@ function compactDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
  */
 export function parseAgentFile(
   content: string,
-  source: "user" | "project",
+  source: "user" | "project" | "shared",
 ): AgentConfigFromMd {
   const { frontmatter, body } = parseFrontmatter(content);
 
@@ -265,6 +266,7 @@ export function parseAgentFile(
     name: parseString(frontmatter, "name"),
     display_name: parseString(frontmatter, "display_name"),
     description: parseString(frontmatter, "description"),
+    color: parseString(frontmatter, "color"),
     tools: parseStringArray(frontmatter, "tools"),
     exclude_tools: parseStringArray(frontmatter, "exclude_tools"),
     extensions: parseExtensions(frontmatter.extensions),
@@ -291,7 +293,7 @@ export function parseAgentFile(
  */
 export async function scanAgentFilesInDir(
   dirPath: string,
-  source: "user" | "project" = "user",
+  source: "user" | "project" | "shared" = "user",
 ): Promise<AgentConfigFromMd[]> {
   try {
     await fs.promises.access(dirPath);
@@ -325,25 +327,28 @@ export async function scanAgentFilesInDir(
 /* ------------------------------------------------------------------ */
 
 /**
- * Merge default agents with user and project overrides.
+ * Merge default agents with user, shared and project overrides.
  *
  * Per-field merge precedence (highest to lowest):
- *   1. project agents
- *   2. user agents
- *   3. default agents
+ *   1. project agents (.pi/agents/)
+ *   2. shared agents (.agents/agents/)
+ *   3. user agents
+ *   4. default agents
  *
  * For each field, if a higher-precedence layer sets the field (not undefined),
  * it wins. Otherwise, the lower layer's value is preserved.
  *
  * @param defaults - Map of default agent configs
  * @param userAgents - User-defined agent configs
- * @param projectAgents - Project-specific agent configs
+ * @param sharedOrProject - Shared configs (4-arg form) or project configs (legacy 3-arg form)
+ * @param projectAgents - Project-specific agent configs (4-arg form only)
  * @returns Merged Map<string, AgentConfig> keyed by agent name
  */
 export function mergeAgents(
   defaults: Map<string, AgentConfig>,
   userAgents: AgentConfigFromMd[],
-  projectAgents: AgentConfigFromMd[],
+  sharedOrProject: AgentConfigFromMd[] = [],
+  projectAgents?: AgentConfigFromMd[],
 ): Map<string, AgentConfig> {
   const result = new Map<string, AgentConfig>();
 
@@ -352,9 +357,15 @@ export function mergeAgents(
     result.set(name, { ...config });
   }
 
-  // Apply user overrides (middle priority), then project (highest priority)
+  // Backward compat: mergeAgents(defaults, user, project) → shared=[]
+  // 4-arg form: mergeAgents(defaults, user, shared, project)
+  const sharedAgents = projectAgents === undefined ? [] : sharedOrProject;
+  const projAgents = projectAgents === undefined ? sharedOrProject : projectAgents;
+
+  // Apply in precedence order: user < shared < project
   mergeAgentOverrides(result, userAgents);
-  mergeAgentOverrides(result, projectAgents);
+  mergeAgentOverrides(result, sharedAgents);
+  mergeAgentOverrides(result, projAgents);
 
   return result;
 }
@@ -391,6 +402,7 @@ function fromMd(md: AgentConfigFromMd): Partial<AgentConfig> {
     name: md.name,
     displayName: md.display_name,
     description: md.description,
+    color: (md as unknown as Record<string, unknown>).color as string | undefined,
     registeredTools: md.tools,
     tools: md.tools,
     excludeTools: md.exclude_tools,

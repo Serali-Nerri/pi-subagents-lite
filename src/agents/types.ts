@@ -11,6 +11,7 @@ export interface AgentConfig {
   name: string;
   displayName?: string;
   description: string;
+  color?: string;
   /** Tools to register with the session (controls availability, not LLM visibility). */
   registeredTools?: string[];
   /**

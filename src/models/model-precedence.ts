@@ -62,6 +62,12 @@ export interface SubagentsConfig {
     widgetDescLengthCompact?: number;
     /** When > 0, thinking deltas stream to output file during message_update events. Default: 0 (disabled). */
     outputThinkingBufferSize?: number;
+    /** Stop an agent when a single tool call runs longer than this (minutes). 0 disables. Default: 45. */
+    toolTimeoutMinutes?: number;
+    /** Stop an agent showing no activity for this long (minutes). 0 disables. Default: 45. */
+    idleTimeoutMinutes?: number;
+    /** Minutes to retain finished agents. Default: 10 (legacy local behavior). */
+    finishedRetentionMinutes?: number;
     [agentType: string]: string | string[] | null | undefined | boolean | number;
   };
   concurrency: {

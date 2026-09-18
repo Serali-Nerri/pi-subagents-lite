@@ -179,8 +179,8 @@ describe("Agent tool schema — stealth", () => {
     expect(agentTool()!.promptGuidelines).toBeUndefined();
   });
 
-  it("includes model param (optional, LLM can override model)", () => {
-    expect(hasParam(agentTool()!.parameters, "model")).toBe(true);
+  it("excludes model param (injected, not LLM-controlled)", () => {
+    expect(hasParam(agentTool()!.parameters, "model")).toBe(false);
   });
 
   it("excludes inherit_context param", () => {
@@ -221,8 +221,8 @@ describe("Agent tool schema — stealth", () => {
     expect(hasParam(agentTool()!.parameters, "run_in_background")).toBe(true);
   });
 
-  it("includes thinking param (optional, LLM can override thinking level)", () => {
-    expect(hasParam(agentTool()!.parameters, "thinking")).toBe(true);
+  it("excludes thinking param (injected, not LLM-controlled)", () => {
+    expect(hasParam(agentTool()!.parameters, "thinking")).toBe(false);
   });
 
   it("includes worktree_path param (optional, no .description())", () => {

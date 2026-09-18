@@ -98,21 +98,24 @@ export function ensureManagerAndWidget(): void {
 export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
   const homeDir = process.env.HOME || "";
   const userAgentDir = path.join(homeDir, ".pi", "agent", "agents");
+  const sharedAgentDir = path.join(ctx.cwd, ".agents", "agents");
   const projectAgentDir = path.join(ctx.cwd, ".pi", "agents");
 
   // Store scan dirs for on-demand discovery (agents added during the session)
-  setAgentScanDirs(userAgentDir, projectAgentDir);
+  setAgentScanDirs(userAgentDir, projectAgentDir, sharedAgentDir);
 
   const disableDefaults = getStore().agent.disableDefaultAgents;
 
-  const [userAgents, projectAgents] = await Promise.all([
+  const [userAgents, sharedAgents, projectAgents] = await Promise.all([
     scanAgentFilesInDir(userAgentDir, "user"),
+    scanAgentFilesInDir(sharedAgentDir, "shared"),
     scanAgentFilesInDir(projectAgentDir, "project"),
   ]);
 
   // Merge with defaults (skip defaults when disableDefaultAgents is on)
+  // Precedence: project > shared > user > defaults
   const defaults = disableDefaults ? new Map() : DEFAULT_AGENTS;
-  const merged = mergeAgents(defaults, userAgents, projectAgents);
+  const merged = mergeAgents(defaults, userAgents, sharedAgents, projectAgents);
 
   // Register into the type registry (skip re-adding defaults)
   registerAgents(merged, { disableDefaultAgents: disableDefaults });
@@ -120,8 +123,8 @@ export async function scanAndRegisterAgents(ctx: ExtensionContext): Promise<void
 
 export async function loadConfigAndRegisterAgents(ctx: ExtensionContext): Promise<void> {
   // ConfigStore is authoritative for config + session overrides + widget/manager
-  // side effects.
-  getStore().reload();
+  // side effects. Project layer (.pi/subagents-lite.json) overrides global.
+  getStore().reload(ctx.cwd);
   ensureManagerAndWidget();
   await scanAndRegisterAgents(ctx);
 }

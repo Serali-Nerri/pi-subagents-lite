@@ -15,6 +15,10 @@ const CONFIG_PATH = path.join(CONFIG_DIR, "subagents-lite.json");
 export const CUSTOM_PROMPT_PATH = path.join(CONFIG_DIR, "subagents-lite-prompt.md");
 /** Default number of grace turns before an agent is force-stopped. */
 export const DEFAULT_GRACE_TURNS = 6;
+/** Default watchdog timeout (tool and idle) in minutes. 0 disables a check. */
+export const DEFAULT_WATCHDOG_TIMEOUT_MINUTES = 45;
+/** Default finished retention in minutes. Preserves legacy 10min local behavior. */
+export const DEFAULT_FINISHED_RETENTION_MINUTES = 10;
 
 /** Valid system prompt modes. */
 export const VALID_SYSTEM_PROMPT_MODES = new Set<string>(["replace", "inherit", "custom"]);
@@ -45,26 +49,80 @@ const DEFAULT_AGENT: SubagentsConfig["agent"] = {
   showCost: false,
   showTime: true,
   deltaInputTokens: false,
+  toolTimeoutMinutes: DEFAULT_WATCHDOG_TIMEOUT_MINUTES,
+  idleTimeoutMinutes: DEFAULT_WATCHDOG_TIMEOUT_MINUTES,
+  finishedRetentionMinutes: DEFAULT_FINISHED_RETENTION_MINUTES,
 };
 
 /**
  * Read config from disk. Merges loaded values over defaults so the result
  * is always a complete SubagentsConfig — no partial shapes for callers to handle.
+ *
+ * When `projectDir` is set, `<projectDir>/.pi/subagents-lite.json` acts as an
+ * override layer (model + concurrency only) over the global file — team-shared
+ * defaults like `oracle` model pins. Unknown/other keys are ignored.
  */
-export function loadConfig(): SubagentsConfig {
-  let raw: SubagentsConfig;
+export function loadConfig(projectDir?: string): SubagentsConfig {
+  let raw: Partial<SubagentsConfig>;
   try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as SubagentsConfig;
+    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Partial<SubagentsConfig>;
   } catch {
-    raw = {} as SubagentsConfig;
+    raw = {};
   }
 
-  // @ts-expect-error TS2783: spread may override 'default', which is intentional (loaded value wins)
+  if (projectDir) {
+    const projectRaw = readProjectRaw(projectDir);
+    if (projectRaw) raw = mergeProjectLayer(raw, projectRaw);
+  }
+
   const concurrency = { default: 4, ...(raw.concurrency ?? {}) } as SubagentsConfig["concurrency"];
   return {
     agent: { ...DEFAULT_AGENT, ...raw.agent },
     concurrency,
   };
+}
+
+/** Keys a project file may set: model family + per-type model overrides + concurrency. */
+const PROJECT_MODEL_KEYS = new Set(["default", "defaultThinking", "defaultMaxTurns"]);
+
+function isProjectAllowedAgentKey(key: string, value: unknown): boolean {
+  if (PROJECT_MODEL_KEYS.has(key)) return true;
+  // Per-type model overrides are plain strings not in the known non-model set.
+  // Import lazily to avoid cycle: config/types only holds constants.
+  if (typeof value === "string") return true;
+  return false;
+}
+
+/** Read `<projectDir>/.pi/subagents-lite.json`; null when absent/malformed. */
+function readProjectRaw(projectDir: string): Partial<SubagentsConfig> | null {
+  try {
+    const p = path.join(projectDir, ".pi", "subagents-lite.json");
+    const parsed = JSON.parse(fs.readFileSync(p, "utf-8")) as Partial<SubagentsConfig>;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Merge project layer over global: project model/concurrency keys win. Pure. */
+export function mergeProjectLayer(
+  global: Partial<SubagentsConfig>,
+  project: Partial<SubagentsConfig>,
+): Partial<SubagentsConfig> {
+  const agent = { ...(global.agent ?? {}) } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(project.agent ?? {})) {
+    if (isProjectAllowedAgentKey(k, v)) agent[k] = v;
+  }
+  const concurrency = {
+    ...(global.concurrency ?? {}),
+    ...(project.concurrency ?? {}),
+    providers: { ...(global.concurrency?.providers ?? {}), ...(project.concurrency?.providers ?? {}) },
+    models: { ...(global.concurrency?.models ?? {}), ...(project.concurrency?.models ?? {}) },
+  };
+  if (Object.keys(concurrency.providers ?? {}).length === 0) delete (concurrency as Record<string, unknown>).providers;
+  if (Object.keys(concurrency.models ?? {}).length === 0) delete (concurrency as Record<string, unknown>).models;
+  return { agent: agent as SubagentsConfig["agent"], concurrency: concurrency as SubagentsConfig["concurrency"] };
 }
 
 /** Write config to disk with atomic rename. */

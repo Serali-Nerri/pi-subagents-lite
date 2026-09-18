@@ -1,3 +1,6 @@
+# Upstream
+Upstream repo: https://github.com/AlexParamonov/pi-subagents-lite.git
+
 # Dev
 **Package manager:** bun (`bun install`, `bun add`, `bun add -d`)
 **Typecheck:** `bun run typecheck`

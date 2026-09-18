@@ -19,6 +19,14 @@ export type ThinkingLevel = string;
 export interface ToolActivity {
   type: "start" | "end";
   toolName: string;
+  toolCallId?: string;
+}
+
+/** Watchdog stop reason for a stuck agent. */
+export interface WatchdogStopDetail {
+  kind: "tool" | "idle";
+  toolName?: string;
+  elapsedMs: number;
 }
 
 /**

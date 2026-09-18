@@ -26,13 +26,13 @@ import { VALID_SYSTEM_PROMPT_MODES, DEFAULT_CONCURRENCY, loadConfig, saveConfigA
 
 /** Injected persistence adapter. Swap for an in-memory adapter in tests. */
 export interface ConfigIO {
-  load(): SubagentsConfig;
+  load(projectDir?: string): SubagentsConfig;
   save(config: SubagentsConfig): void;
 }
 
 /** Production adapter wrapping the real config file. */
 export const fileConfigIO: ConfigIO = {
-  load: () => loadConfig(),
+  load: (projectDir?: string) => loadConfig(projectDir),
   save: (c) => saveConfigAtomic(c),
 };
 
@@ -83,6 +83,12 @@ export interface ResolvedAgentSettings {
   readonly deltaInputTokens: boolean;
   /** Buffer size for streaming thinking blocks to output file. 0 = disabled. */
   readonly outputThinkingBufferSize: number;
+  /** Stop a single tool call running longer than this (minutes). 0 disables. */
+  readonly toolTimeoutMinutes: number;
+  /** Stop an agent with no activity for this long (minutes). 0 disables. */
+  readonly idleTimeoutMinutes: number;
+  /** Minutes to retain finished agents. */
+  readonly finishedRetentionMinutes: number;
 }
 
 /** Side-effect targets, injected after construction. */
@@ -150,6 +156,9 @@ export class ConfigStore {
       showTime: a.showTime !== false,
       deltaInputTokens: a.deltaInputTokens !== false,
       outputThinkingBufferSize: a.outputThinkingBufferSize ?? 0,
+      toolTimeoutMinutes: a.toolTimeoutMinutes ?? 45,
+      idleTimeoutMinutes: a.idleTimeoutMinutes ?? 45,
+      finishedRetentionMinutes: a.finishedRetentionMinutes ?? 10,
     };
   }
 
@@ -289,6 +298,18 @@ export class ConfigStore {
         this.config.agent.outputThinkingBufferSize = size;
         this.persist();
       },
+      setToolTimeoutMinutes: (n: number): void => {
+        this.config.agent.toolTimeoutMinutes = n;
+        this.persist();
+      },
+      setIdleTimeoutMinutes: (n: number): void => {
+        this.config.agent.idleTimeoutMinutes = n;
+        this.persist();
+      },
+      setFinishedRetentionMinutes: (n: number): void => {
+        this.config.agent.finishedRetentionMinutes = n;
+        this.persist();
+      },
       setShowAgentSelector: (enabled: boolean): void => {
         this.config.agent.showAgentSelector = enabled;
         this.persist();
@@ -422,8 +443,8 @@ export class ConfigStore {
   // ── Lifecycle ──────────────────────────────────────────────────
 
   /** Re-read disk, reset session overrides + toggle state, re-sync deps. Called at session_start. */
-  reload(): void {
-    this.config = this.io.load();
+  reload(projectDir?: string): void {
+    this.config = this.io.load(projectDir);
     this.sessionOverrides = { default: null };
     this.sessionShowCost = undefined;
     this.lastToolsExpanded = undefined;

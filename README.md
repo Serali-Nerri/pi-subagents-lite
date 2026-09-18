@@ -113,10 +113,10 @@ Spawn a sub-agent.
 | `prompt` | ✅ | The task for the sub-agent |
 | `description` | | Brief description for the caller (optional — derived from `prompt` if omitted) |
 | `agent` | | Type name — `general-purpose`, `Explore`, or any custom type. **Auto-populated** from `.md` files in your agent directories; drop a file, it appears in the enum. `hidden: true` hides a type from the list (still callable by name). |
-| `model` | | Model override as `id`, `provider/id`, or `id:thinking`; takes precedence over configured defaults |
-| `thinking` | | Thinking override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `run_in_background` | | Fire-and-forget; result delivered automatically when done |
 | `worktree_path` | | Absolute path to a git worktree. Agent runs in that worktree's context, discovers agents from its `.pi/agents/`, and shows a worktree label in the UI. Validated against the parent repo's git common dir. |
+
+> `model`, `thinking`, `max_turns` and `max_tokens` are **not visible to the LLM** — they are injected at call time from agent config and frontmatter (e.g. your `oracle` pins `model/thinking` in its `.md`). Set overrides via `/agents` menu or config files, not via tool params. See [Model Resolution](#model-resolution).
 
 > `max_turns` and `max_tokens` are **not visible to the LLM** — they are injected at call time from agent config and frontmatter. See [Custom Agent Types](#custom-agent-types).
 
@@ -138,9 +138,9 @@ The result nudges the LLM not to poll, sleep, or timeout-wait — results are de
 
 ## Custom Agent Types
 
-Drop a `.md` file into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global). Frontmatter configures the agent; the body is its system prompt. The `name` field (or filename) becomes the agent type and **auto-populates the `agent` parameter's enum** — no registration. Files added mid-session are picked up on the next call that references them.
+Drop a `.md` file into `.pi/agents/` (project), `.agents/agents/` (shared) or `~/.pi/agent/agents/` (global). Frontmatter configures the agent; the body is its system prompt. The `name` field (or filename) becomes the agent type and **auto-populates the `agent` parameter's enum** — no registration. Files added mid-session are picked up on the next call that references them.
 
-Built-ins `general-purpose` and `Explore` are always available. **Project agents override user agents, which override built-ins.**
+Built-ins `general-purpose` and `Explore` are always available. **Project overrides shared, shared overrides user, user overrides built-ins.**
 
 ```markdown
 ---
@@ -179,6 +179,7 @@ A minimal agent — just `name` and `description` — gets everything: all tools
 | `thinking` | string | inherit parent | One of: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a provider-specific value. |
 | `max_turns` | number | unlimited | Soft turn limit. Agent gets a steer at the limit, then `max_turns + graceTurns` before hard abort. |
 | `max_tokens` | number | unlimited | Max output tokens per LLM response. Injected into provider request payloads. |
+| `color` | string | none | Agent color hint for UI (e.g. `cyan`, `#RRGGBB`). |
 | `hidden` | `true` \| `false` | `false` | `true` hides the type from the enum (LLM can't see or invoke it). Still callable by name. |
 
 ### Tool control (`tools` / `exclude_tools`)
@@ -332,6 +333,16 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
 
 `~/.pi/agent/subagents-lite.json` — managed via `/agents`, or edit directly. Per-type model overrides (e.g. `"Explore"`) are dynamic keys alongside the special fields.
 
+Project override: commit `.pi/subagents-lite.json` in your repo for team-shared defaults. Only model/concurrency keys are read (`default`, `defaultThinking`, `defaultMaxTurns`, per-type `"provider/model"`, `concurrency`); everything else stays in the global file. Project wins over global.
+
+```json
+// .pi/subagents-lite.json (example: pin oracle for the whole team)
+{
+  "agent": { "oracle": "openai-codex/gpt-6-astra", "defaultThinking": "max" },
+  "concurrency": { "default": 4 }
+}
+```
+
 ```json
 {
   "agent": {
@@ -385,6 +396,9 @@ With **Cost display** ON, stats show dollar cost (`✓ Builder·2🛠 ·5⟳ ·�
 | `widgetShortcut` | `false` | When ON, ctrl+o (tool expansion toggle) syncs with widget compact mode. When OFF, compact is manual via `widgetCompact`. |
 | `showAgentSelector` | `false` | Render the subagent selector list below the editor. Off by default; `/subagents` toggles the current session without touching this key. |
 | `outputThinkingBufferSize` | `200` | Thinking buffer ring size in chars. `0` = OFF. Flushes to output log at sentence boundaries. |
+| `toolTimeoutMinutes` | `45` | Stop an agent when a single tool call runs longer than this. `0` disables. |
+| `idleTimeoutMinutes` | `45` | Stop an agent with no activity (tools/text) for this long. `0` disables. |
+| `finishedRetentionMinutes` | `10` | Minutes to retain finished agents before eviction. |
 
 ### Stats visibility
 
